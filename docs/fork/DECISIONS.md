@@ -75,7 +75,7 @@ live in `fork/e2e/` with their own `package.json` (Playwright, the machine's Chr
 stays upstream's. A scenario drives the screen, calls REST and calls MCP as an external client, and saves
 screenshots and JSON responses as evidence.
 
-## D-009 F-001: the dashboard keeps computing Available balance in the browser (2026-11-26)
+## D-010 F-001: the dashboard keeps computing Available balance in the browser (2026-11-26)
 
 Upstream sums the headline from `GET /api/accounts` in the browser. F-001 keeps that and adds one predicate to the
 existing filter, instead of making the dashboard call the new server route: no new request, loading state or

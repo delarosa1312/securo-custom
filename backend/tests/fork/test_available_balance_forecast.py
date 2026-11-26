@@ -136,7 +136,7 @@ async def test_scheduled_flows_of_an_off_account_stay_out(session, test_user, te
 
 
 @pytest.mark.asyncio
-async def test_transfer_into_an_off_account_still_leaves_available_money(session, test_user, test_workspace):
+async def test_scheduled_move_into_an_off_account_still_leaves_available_money(session, test_user, test_workspace):
     checking = await _account(session, test_user, test_workspace, "Current account", "checking", "500.00")
     await _account(session, test_user, test_workspace, "Reserve", "savings", "1000.00", include=False)
     day3 = app_today() + timedelta(days=3)
@@ -203,3 +203,23 @@ async def test_pattern_split_over_two_accounts_keeps_only_the_included_share(ses
     forecast = await _forecast(session, test_workspace)
     payroll = [e for e in _events(forecast) if "Acme Payroll" in e]
     assert payroll and all(e.startswith("+4000.00 ") for e in payroll)
+
+
+@pytest.mark.asyncio
+async def test_past_paired_transfers_into_an_off_account_stay_ignored(session, test_user, test_workspace):
+    # Decision Q7 (Matheus, option B): only scheduled rules count; history transfers stay internal moves.
+    checking = await _account(session, test_user, test_workspace, "Current account", "checking", "5000.00")
+    reserve = await _account(session, test_user, test_workspace, "Reserve", "savings", "1000.00", include=False)
+    for weeks_back in (8, 4):
+        moved = app_today() - timedelta(weeks=weeks_back)
+        pair = uuid.uuid4()
+        out_leg = _posted(test_user, test_workspace, checking, "Move to reserve", "500.00", "debit", moved)
+        in_leg = _posted(test_user, test_workspace, reserve, "Move to reserve", "500.00", "credit", moved)
+        out_leg.transfer_pair_id = in_leg.transfer_pair_id = pair
+        session.add_all([out_leg, in_leg])
+    await session.commit()
+
+    forecast = await generate_cashflow_forecast(session, test_workspace.id, horizon_days=60, reference_date=app_today())
+    assert forecast.summary.total_projected_discretionary == Decimal("0.00")
+    assert not any("Move to reserve" in e for e in _events(forecast))
+    assert forecast.summary.starting_liquid_balance == Decimal("4000.00")
