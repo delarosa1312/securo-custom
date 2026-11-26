@@ -79,6 +79,7 @@ async def test_change_from_splits_the_series_and_keeps_history(session, test_use
         session, test_workspace.id, rec.id, since, _changes(amount="1600.00"), preview=False
     )
     new = result.schedule
+    assert new is not None
     await session.refresh(rec)
     assert rec.end_date == since - timedelta(days=1)
     assert (new.predecessor_id, new.start_date, new.amount) == (rec.id, since, Decimal("1600.00"))
@@ -121,7 +122,7 @@ async def test_salary_change_keeps_past_totals(session, test_user, test_workspac
     assert after.income == before.income == Decimal("3000.00")
     later = await service.get_month_summary(session, test_workspace.id, month_day(2, 1), "BRL")
     assert later.income == Decimal("3300.00")
-    assert result.schedule.next_occurrence == month_day(1, 5)
+    assert result.schedule is not None and result.schedule.next_occurrence == month_day(1, 5)
 
 
 @pytest.mark.asyncio
@@ -140,6 +141,7 @@ async def test_change_from_with_new_dates_removes_rows_still_to_come(session, te
     assert result.impact.skipped_dropped == [month_day(3, 10)]
     assert (await session.get(Transaction, ahead.id)) is None
     new = result.schedule
+    assert new is not None
     assert (new.start_date, new.day_of_month, new.next_occurrence) == (month_day(2, 1), 20, month_day(2, 1))
     projected = [day for day, _, rid in await _projected(session, test_user, test_workspace) if rid == str(new.id)]
     assert projected[:3] == [month_day(2, 1).isoformat(), month_day(3, 20).isoformat(), month_day(4, 20).isoformat()]
@@ -154,6 +156,7 @@ async def test_weekend_rule_after_a_split(session, test_user, test_workspace):
         session, test_workspace.id, rec.id, month_day(3, 1), _changes(amount="99.00"), preview=False
     )
     new = result.schedule
+    assert new is not None
     assert (new.weekend_adjustment, new.day_of_month) == ("next_monday", 1)
     dates = [day for day, _, rid in await _projected(session, test_user, test_workspace) if rid == str(new.id)]
     for iso in dates:
@@ -173,6 +176,7 @@ async def test_change_from_a_transfer_moves_both_legs(session, test_user, test_w
         session, test_workspace.id, rec.id, month_day(2, 10), _changes(amount="300.00"), preview=False
     )
 
+    assert result.schedule is not None
     legs = await linked_rows(session, result.schedule.id)
     assert [(leg.type, leg.amount) for leg in legs] == [("debit", Decimal("300.00")), ("credit", Decimal("300.00"))]
     assert result.schedule.destination_account_id == savings.id
@@ -232,7 +236,7 @@ async def test_end_series(session, test_user, test_workspace):
     ended, _ = await series.end_series(
         session, test_workspace.id, rec.id, month_day(2, 10), delete_scheduled=True, preview=False
     )
-    assert ended.end_date == month_day(2, 10)
+    assert ended is not None and ended.end_date == month_day(2, 10)
     assert await session.get(Transaction, ahead.id) is None
     assert await ledger(session, rec.id) == {}
     await service.generate_pending(session, test_user.id, up_to=month_day(6, 11))
@@ -317,6 +321,7 @@ async def test_delete_and_restore_act_on_the_whole_series(session, test_user, te
     new = (await series.change_from(
         session, test_workspace.id, rec.id, month_day(3, 10), _changes(amount="1600.00"), preview=False
     )).schedule
+    assert new is not None
 
     ids, _ = await series.trash(session, test_workspace.id, new.id, delete_scheduled=False, preview=False)
     assert set(ids) == {rec.id, new.id}
