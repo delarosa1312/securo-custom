@@ -249,6 +249,8 @@ export interface Account {
   open_bill_total_primary?: number | null
   is_closed: boolean
   closed_at: string | null
+  // Fork F-001: false leaves a checking, savings or wallet account out of available money only.
+  include_in_available?: boolean
 }
 
 export interface CreditCardBill {

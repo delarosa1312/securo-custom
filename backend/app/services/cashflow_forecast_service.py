@@ -21,6 +21,7 @@ from app.schemas.forecast import (
     SubscriptionStatusEnum,
 )
 from app.core.config import get_settings
+from app.fork.available_balance import counts_as_available, left_out_account_ids
 from app.services import account_service, recurring_detector_service
 from app.services.fx_rate_service import convert_or_none
 from app.services.recurring_transaction_service import get_occurrences_in_range
@@ -171,6 +172,9 @@ async def generate_cashflow_forecast(
         is_card = acc["type"] == "credit_card"
         if not is_card and acc["type"] not in _LIQUID_ACCOUNT_TYPES:
             continue
+        # Fork F-001: an account switched out of available money does not fund the runway.
+        if not is_card and not counts_as_available(acc):
+            continue
         # Cards on one consolidated credit line each carry the whole line's
         # debt, so the line is counted once, as on the dashboard.
         shared_line = acc.get("shared_balance_group") if is_card else None
@@ -195,6 +199,8 @@ async def generate_cashflow_forecast(
 
     starting_liquid_balance = starting_liquid_balance.quantize(Decimal("0.01"))
     credit_card_balance = credit_card_balance.quantize(Decimal("0.01"))
+    # Fork F-001: what belongs to these accounts stays out of the whole simulation.
+    left_out = left_out_account_ids(accounts)
 
     # 2. Fetch manual recurring transactions in workspace
     rec_query = select(RecurringTransaction).where(
@@ -217,6 +223,7 @@ async def generate_cashflow_forecast(
         lookback_days=180,
         reference_date=today,
         exclude_recurring_ids=manual_recurring_ids,
+        exclude_account_ids=left_out,  # fork F-001
     )
     unconverted_currencies.update(detected_res.unconverted_currencies)
 
@@ -228,6 +235,8 @@ async def generate_cashflow_forecast(
     # patterns that are the same bill under another payee name.
     manual_rules: list[dict] = []
     for r in manual_recurrings:
+        if r.account_id in left_out:  # fork F-001
+            continue
         direction = FlowDirectionEnum.INFLOW if r.type == "credit" else FlowDirectionEnum.OUTFLOW
         amount, _ = await convert_or_none(
             session, Decimal(str(r.amount)), r.currency, base_currency, today
@@ -319,6 +328,8 @@ async def generate_cashflow_forecast(
         }
         burn_total = Decimal("0.00")
         for t, pnl_amount in hist_txs:
+            if t.account_id in left_out:  # fork F-001
+                continue
             if t.recurring_transaction_id in manual_recurring_ids:
                 continue
             name_key = recurring_detector_service.normalize_merchant_name(t.payee or t.description).lower()

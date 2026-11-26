@@ -51,6 +51,9 @@ import { useCollectionFilter } from '@/contexts/collection-filter-context'
 import { useWorkspace } from '@/contexts/workspace-context'
 import { formatCurrency } from '@/lib/format'
 import { LOAN_COLLATERAL_TYPES } from '@/lib/property-equity'
+import { AvailableBalanceMarker } from '@/fork/available-balance/available-balance-marker'
+import { AvailableBalanceSwitch } from '@/fork/available-balance/available-balance-switch'
+import { hasAvailableSetting } from '@/fork/available-balance/available-account'
 
 // Account types offered in the create/edit dialog. Shared between the manual
 // type selector and the connected-account override selector so the list stays
@@ -395,7 +398,7 @@ export default function AccountsPage() {
                           <p className="text-xs text-muted-foreground">
                             {t(cfg.label)}
                             {accountMask && <> · <span className="tabular-nums">{accountMask}</span></>}
-                            {acc.shared_balance_group && <> · <span>{t('accounts.sharedCreditBalance')}</span></>}
+                            {acc.shared_balance_group && <> · <span>{t('accounts.sharedCreditBalance')}</span></>}<AvailableBalanceMarker account={acc} />
                             {dueText && <> · <span className={dueClass}>{dueText}</span></>}
                           </p>
                         </div>
@@ -602,7 +605,7 @@ export default function AccountsPage() {
                                   <p className="text-xs text-muted-foreground">
                                     {t(cfg.label)}
                                     {accountMask && <> · <span className="tabular-nums">{accountMask}</span></>}
-                                    {acc.shared_balance_group && <> · <span>{t('accounts.sharedCreditBalance')}</span></>}
+                                    {acc.shared_balance_group && <> · <span>{t('accounts.sharedCreditBalance')}</span></>}<AvailableBalanceMarker account={acc} />
                                     {dueText && <> · <span className={dueClass}>{dueText}</span></>}
                                   </p>
                                 </div>
@@ -948,6 +951,7 @@ export function AccountDialog({
     credit_limit?: number | null
     statement_close_day?: number | null
     payment_due_day?: number | null
+    include_in_available?: boolean
   }) => void
   loading: boolean
 }) {
@@ -982,6 +986,7 @@ export function AccountDialog({
   const [loanTerms, setLoanTerms] = useState(() => loanTermsFrom(account, account?.currency ?? userCurrency))
   // Opened by the user, not by the amount: clearing the amount must not collapse it.
   const [termsOpen, setTermsOpen] = useState(() => account?.loan_original_amount != null)
+  const [includeInAvailable, setIncludeInAvailable] = useState(account?.include_in_available !== false)
   const setLoanTerm = <K extends keyof LoanTermsForm>(key: K, value: LoanTermsForm[K]) =>
     setLoanTerms((prev) => ({ ...prev, [key]: value }))
 
@@ -1009,6 +1014,7 @@ export function AccountDialog({
     setSecuredAssetId(account?.secured_asset_id ?? '')
     setLoanTerms(loanTermsFrom(account, account?.currency ?? userCurrency))
     setTermsOpen(account?.loan_original_amount != null)
+    setIncludeInAvailable(account?.include_in_available !== false)
   }
   // A changed balance defaults to today in the workspace, once its timezone is known.
   const autoBalanceDate = !!account && !balanceDatePicked && !!timeZone
@@ -1065,6 +1071,10 @@ export function AccountDialog({
                 credit_limit: creditLimit !== '' ? parseFloat(creditLimit) : null,
                 statement_close_day: parseDay(statementCloseDay),
                 payment_due_day: parseDay(paymentDueDay),
+              }),
+              // Fork F-001: sent only when changed, so other edits leave it alone.
+              ...(account && hasAvailableSetting(type) && includeInAvailable !== (account.include_in_available !== false) && {
+                include_in_available: includeInAvailable,
               }),
             })
           }}
@@ -1269,6 +1279,9 @@ export function AccountDialog({
                 </div>
               </div>
             </div>
+          )}
+          {account && hasAvailableSetting(type) && (
+            <AvailableBalanceSwitch checked={includeInAvailable} onCheckedChange={setIncludeInAvailable} />
           )}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>

@@ -86,3 +86,13 @@ upstream's byte for byte (tested). Query limits stay upstream's without the opti
 Known edges: the route's OpenAPI advertises `months` up to 24 and a union response for every caller, and when
 `months` is out of range together with another invalid parameter the 422 lists only the other one (upstream lists
 both); a request with only `months` out of range gets upstream's exact body.
+
+## D-010 F-001: the dashboard keeps computing Available balance in the browser (2026-11-26)
+
+Upstream sums the headline from `GET /api/accounts` in the browser. F-001 keeps that and adds one predicate to the
+existing filter, instead of making the dashboard call the new server route: no new request, loading state or
+layout change in an upstream page. The server figure (`app/fork/available_balance.py`) uses the same inputs and
+the same rule (converted balance, or the native one with `fx_fallback` when no rate exists), and the fork tests
+pin both to the issue's worked example so they cannot drift apart unnoticed. The route lives under
+`/api/accounts` so the existing `accounts` token scope covers it; it is mounted before upstream's accounts
+router because `/{account_id}` would otherwise take the path.

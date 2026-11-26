@@ -26,6 +26,7 @@ import type { PluginWidgetEntry } from '@/lib/library'
 import { localized } from '@/lib/localized-text'
 import { pluginWidgetWindow } from '@/lib/plugin-report-view'
 import type { DashboardSummary, InvoiceDirection, Transaction } from '@/types'
+import { isIncludedInAvailable } from '@/fork/available-balance/available-account'
 
 /**
  * What the dashboard is looking at, for widgets that fetch their own data.
@@ -454,7 +455,7 @@ export function CreditCardsWidget({ scope }: { scope: DashboardScope }) {
   const cards = scoped.filter((a) => a.type === 'credit_card')
   const owed = Math.max(0, -sumAccountBalances(cards))
   const available = scoped
-    .filter((a) => a.type === 'checking' || a.type === 'savings')
+    .filter((a) => (a.type === 'checking' || a.type === 'savings') && isIncludedInAvailable(a))
     .reduce((sum, a) => sum + Number(a.balance_primary ?? a.current_balance), 0)
   const money = (value: number, currency = scope.currency) => mask(formatCurrency(value, currency, locale))
   // Cards on one shared credit line report the line's whole balance each: list
