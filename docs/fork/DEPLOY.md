@@ -36,8 +36,10 @@ Release record: pending (first release).
 
 ## Local stack with synthetic data
 
-Pending (`fork/tools/stack.sh`): Compose project of its own, own ports and volumes, seeded by
-`backend/scripts/seed_perf.py` or a fork seed. Never production volumes, secrets or data.
+`fork/tools/stack.sh` (usage in `PROCESS.md`, section E2E): upstream's `docker-compose.yml` plus
+`fork/stack/compose.yml`, project `securo-custom-e2e`, loopback ports 13000, 18000 and 18765, project volumes, no
+host secrets or backup folder, seeded through the REST API by `fork/stack/seed.py`. Never production volumes,
+secrets or data.
 
 ## Coolify
 
@@ -63,8 +65,11 @@ MCP configuration. The financial migration is not repeated.
 Reverting image tags alone is not enough once a migration ran: the older image checks the database heads and will
 not start against a newer schema. A rollback is one of:
 
-1. `alembic downgrade` of the fork migrations added by the release, run with the new image, then the old tag
-   (possible because fork migrations are additive and their downgrades are tested); or
+1. `alembic downgrade fork@<fork head of the previous release>` (for example `fork@f002`), run with the new image,
+   then the old tag (possible because fork migrations are additive and their downgrades are tested). It touches
+   only our line. Never `fork@base`: that target is upstream's first migration and starts downgrading upstream's
+   line (verified in #1, D-003). A release that also brought upstream migrations cannot be rolled back this way:
+   use 2; or
 2. restore the pre-deploy dump, then the old tag (loses whatever was entered after the dump).
 
 Each release note states which applies and the exact commands. Rehearsal on isolated test data: pending.
