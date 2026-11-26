@@ -1,27 +1,25 @@
 {
+  "budgetForecast": {
+    "toggle": "Include budgets",
+    "toggleHelp": "Adds what is left of each monthly budget as expected spending, spread evenly per day (this month from tomorrow). Budgets have no account: with an account or collection filter the amount is shown apart and not subtracted. Cannot be combined with Include estimate yet.",
+    "panelTitle": "Where budgeted spending comes from",
+    "introSubtracted": "What is left of each monthly budget (budget minus posted minus scheduled, never below zero) is counted as spending and subtracted from the projected balance.",
+    "introUnallocated": "Budgets have no account, so with an account or collection filter this amount is shown apart and not subtracted from the balance.",
+    "category": "Category",
+    "budget": "Budget",
+    "posted": "Posted",
+    "scheduled": "Scheduled",
+    "remaining": "Remaining",
+    "forecast": "In forecast",
+    "total": "Total",
+    "spread": "Spread evenly per day from {{from}} to {{to}}",
+    "noDaysLeft": "No days left this month: not projected",
+    "empty": "No budgets in this period. Set budgets on the Budgets page to include them here."
+  },
   "reports": {
     "budgetExpenses": "Budgeted Spending",
     "unallocatedBudget": "Unallocated Budget",
     "budget_outflow": "Budgeted spending",
     "range24m": "24M"
-  },
-  "fork": {
-    "budgetForecast": {
-      "toggle": "Include budgets",
-      "toggleHelp": "Adds what is left of each monthly budget as expected spending, spread evenly per day (this month from tomorrow). Budgets have no account: with an account or collection filter the amount is shown apart and not subtracted. Cannot be combined with Include estimate yet.",
-      "panelTitle": "Where budgeted spending comes from",
-      "introSubtracted": "What is left of each monthly budget (budget minus posted minus scheduled, never below zero) is counted as spending and subtracted from the projected balance.",
-      "introUnallocated": "Budgets have no account, so with an account or collection filter this amount is shown apart and not subtracted from the balance.",
-      "category": "Category",
-      "budget": "Budget",
-      "posted": "Posted",
-      "scheduled": "Scheduled",
-      "remaining": "Remaining",
-      "forecast": "In forecast",
-      "total": "Total",
-      "spread": "Spread evenly per day from {{from}} to {{to}}",
-      "noDaysLeft": "No days left this month: not projected",
-      "empty": "No budgets in this period. Set budgets on the Budgets page to include them here."
-    }
   }
 }
