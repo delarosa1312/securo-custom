@@ -27,6 +27,7 @@ from app.services.dashboard_service import (
     _get_forecast_transactions,
 )
 from app.services._query_filters import reporting_date_col, reporting_date_value
+from app.fork import recurring_transfers as fork_transfers
 from app.services.admin_service import get_credit_card_accounting_mode
 from app.services.fx_rate_service import convert as fx_convert
 from app.services.viewer_currency import ViewerCurrency, viewer_currency
@@ -603,9 +604,12 @@ async def _project_recurring_items(
         )
     )
     if account_ids is not None:
-        stmt = stmt.where(RecurringTransaction.account_id.in_(account_ids))
+        stmt = stmt.where(fork_transfers.touches_accounts(account_ids))  # fork F-004
     result = await session.execute(stmt)
-    recurring_rows = list(result.scalars().all())
+    # Fork F-004: a transfer schedule is projected as its two legs, each on its own account.
+    recurring_rows = await fork_transfers.expand_legs(
+        session, list(result.scalars().all()), account_ids
+    )
 
     items: list[tuple[TransactionCalendarItem, float, list[tuple[bool, float]]]] = []
     deltas: dict[date, float] = {}
@@ -628,7 +632,7 @@ async def _project_recurring_items(
             session, rec.amount, rec.currency, primary_currency, rec.amount_primary
         )
         signed_delta = amount_primary if rec.type == "credit" else -amount_primary
-        is_transfer = bool(category and category.treat_as_transfer)
+        is_transfer = bool(category and category.treat_as_transfer) or fork_transfers.is_transfer_leg(rec)
         is_ignored = bool(category and category.is_ignored)
         template_total = abs(float(rec.amount or 0))
         if rec.has_category_lines and rec.category_lines and template_total:

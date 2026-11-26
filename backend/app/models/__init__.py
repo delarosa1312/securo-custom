@@ -52,6 +52,7 @@ from app.models.reconciliation import (
     ReconciliationRule,
     ReconciliationSuggestion,
 )
+from app.fork.models import RecurringOccurrence  # noqa: F401  fork F-004 table
 
 # Side-effect import: register the before_insert listener that auto-stamps
 # workspace_id from user_id on financial entities. Imported last so all

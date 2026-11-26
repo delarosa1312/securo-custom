@@ -840,7 +840,7 @@ export default function DashboardPage() {
       // A split template's occurrence shows its parts like a split row.
       const projectedSplit = projectedSplitSource(pt) as Transaction | null
       rows.push({
-        key: `proj-${pt.recurring_id}-${pt.date}`,
+        key: `proj-${pt.recurring_id}-${pt.account_id}-${pt.date}`,
         description: pt.description,
         date: pt.reporting_date ?? pt.date,
         type: pt.type,

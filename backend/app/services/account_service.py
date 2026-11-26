@@ -1066,7 +1066,11 @@ async def delete_account(session: AsyncSession, account_id: uuid.UUID, workspace
     )
     await session.execute(
         delete(RecurringTransaction).where(
-            RecurringTransaction.account_id == account_id
+            or_(
+                RecurringTransaction.account_id == account_id,
+                # Fork F-004: a transfer schedule into the account goes with it.
+                RecurringTransaction.destination_account_id == account_id,
+            )
         )
     )
     await session.execute(

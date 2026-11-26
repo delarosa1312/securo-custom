@@ -90,6 +90,9 @@ async def list_recurring_transactions(
                 else None
             ),
             "account_id": str(r.account_id) if getattr(r, "account_id", None) else None,
+            # Fork F-004: set on a recurring transfer (account_id is then the source).
+            "to_account_id": str(r.destination_account_id) if r.destination_account_id else None,
+            "destination_amount": num(r.destination_amount),
         }
         for r in rows
     ]

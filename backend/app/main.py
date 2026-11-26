@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.accounts import router as accounts_router
 from app.fork.api.available_balance import router as fork_available_balance_router
+from app.fork.api.recurring_transfers import router as fork_recurring_transfers_router
 from app.api.budgets import router as budgets_router
 from app.api.backups import router as backups_router
 from app.api.goals import router as goals_router
@@ -211,6 +212,8 @@ app.include_router(import_logs_router)
 app.include_router(fork_available_balance_router)
 app.include_router(accounts_router)
 app.include_router(connections_router)
+# Fork F-004: before recurring_router, so /transfer-conversions is never read as an id.
+app.include_router(fork_recurring_transfers_router)
 app.include_router(recurring_router)
 app.include_router(forecast_router)
 app.include_router(budgets_router)
