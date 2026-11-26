@@ -59,8 +59,9 @@ test('Recurring transfers: screen, REST, MCP, conversion and generation', async 
   const existing = await rest<Recurring[]>(token, 'GET', '/api/recurring-transactions')
   expect(existing.some((r) => r.description === PLAN), 'run on a freshly seeded stack').toBe(false)
 
-  // The plan's first occurrence: the 10th on or after today, as the form's start date is today.
-  const firstDay = new Date().getDate() <= 10 ? monthDay(0, 10) : monthDay(1, 10)
+  // The plan starts on the next 10th after today; a schedule's start date is its first occurrence.
+  const nextMonth = new Date().getDate() >= 10
+  const firstDay = nextMonth ? monthDay(1, 10) : monthDay(0, 10)
   const month = monthOf(firstDay)
   const summary = (ids?: string[]) =>
     rest<Summary>(token, 'GET', `/api/dashboard/summary?month=${month}${(ids ?? []).map((id) => `&account_ids=${id}`).join('')}`)
@@ -79,6 +80,13 @@ test('Recurring transfers: screen, REST, MCP, conversion and generation', async 
   expect(await dialog.getByLabel('To account').locator('option').allTextContents()).not.toContain(CHECKING)
   await dialog.getByLabel('To account').selectOption({ label: SAVINGS })
   await dialog.locator('input[type="number"]').fill('10')
+  await dialog.getByText('Start date', { exact: true }).locator('xpath=following-sibling::*[1]').click()
+  const picker = page.locator('[data-radix-popper-content-wrapper]')
+  if (nextMonth) await picker.locator('button').nth(2).click()
+  await picker.getByRole('button', { name: '10', exact: true }).click()
+  if (await picker.isVisible()) await page.keyboard.press('Escape')
+  await expect(picker).toHaveCount(0)
+  await expect(dialog).toBeVisible()
   await screenshot(page, 'f004.form.transfer')
   const posted = page.waitForResponse((r) => r.request().method() === 'POST' && r.url().endsWith('/api/recurring-transactions'))
   await dialog.getByRole('button', { name: 'Save', exact: true }).click()
