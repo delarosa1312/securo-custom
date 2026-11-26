@@ -50,7 +50,11 @@ conflict, its resolution by hand, and today's state.
 7. `fork/tools/check.sh`, the full backend and frontend suites through `fork/tools/test.sh`, then the E2E scenarios
    of every active patch. Compare failures with upstream's own CI for that tag before calling one ours. A pull
    request opened with the workflow's default token starts no workflow run, so the tool dispatches `ci.yml` on the
-   sync branch.
+   sync branch. When the release changed `docker-compose.prod.yml`, `check.sh` reports `Coolify files rendered`
+   as stale: run `python3 fork/deploy/render.py` on the sync branch and read the diff of `fork/deploy/coolify/*.yml`.
+   A new upstream service on the backend image goes into `fork/deploy/production.override.yml` (every
+   backend-image service runs the custom tag) and gets limits in `staging.override.yml`; render again and commit
+   the result to `sync/<tag>` (`DEPLOY.md`, Deploy files).
 8. Pull request `sync/<tag>` to `main` (the tool opens it): security callout first, release notes summary (sections
    with item counts and the "Before you update" section of every release in the range), overlaps, new upstream
    migrations, upstream workflow files changed, migration results, files changed by hand. The tool owns only the block between its markers and
