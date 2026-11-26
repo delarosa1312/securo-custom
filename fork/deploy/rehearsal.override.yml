@@ -1,0 +1,32 @@
+# Local rehearsal only (fork/deploy/rehearse.sh), on top of the production or stock compose file: loopback ports,
+# project volumes, no host secrets or backup folders, synthetic data. Never production volumes or data.
+x-rehearsal-backend: &rehearsal-backend
+  environment:
+    AGENTS_ENABLED: "true"
+    REGISTRATION_ENABLED: "true"
+    TESOURO_DIRETO_ENABLED: "false"
+  volumes: !override
+    - attachments:/app/data/attachments
+    - backups:/app/data/backups
+    - agent_knowledge:/app/data/agent_knowledge
+    - agent_embedding_models:/app/data/embedding_models
+
+services:
+  migrate: *rehearsal-backend
+  celery-worker: *rehearsal-backend
+  celery-beat: *rehearsal-backend
+  backend:
+    <<: *rehearsal-backend
+    ports: !override
+      - "127.0.0.1:${REHEARSAL_BACKEND_PORT:-28000}:8000"
+  mcp-server:
+    <<: *rehearsal-backend
+    profiles: !reset []
+    ports: !override
+      - "127.0.0.1:${REHEARSAL_MCP_PORT:-28765}:8765"
+  frontend:
+    ports: !override
+      - "127.0.0.1:${REHEARSAL_FRONTEND_PORT:-23000}:8080"
+
+volumes:
+  backups:

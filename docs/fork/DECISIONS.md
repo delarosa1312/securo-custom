@@ -97,6 +97,30 @@ pin both to the issue's worked example so they cannot drift apart unnoticed. The
 `/api/accounts` so the existing `accounts` token scope covers it; it is mounted before upstream's accounts
 router because `/{account_id}` would otherwise take the path.
 
+## D-013 Releases: our own images from a script, one tag variable, two rollbacks (2026-11-26, #2)
+
+Production runs upstream's prebuilt images on Coolify. Our images replace every backend-image service and the
+frontend at once, because they must agree on the migration heads. Choices:
+- The release logic lives in `fork/release/` (`build.sh`, `record.py`, tested by `test.sh`), and
+  `.github/workflows/fork-release.yml` only calls it: the fork had never run a workflow, and the same script
+  proves itself locally. Images build from `git archive` of a commit on `main` that contains the upstream base
+  tag, so nothing untracked reaches them. The image tag is the version verbatim (`v0.22.0-custom.1`); upstream's
+  `type=semver` would treat `-custom.1` as a prerelease, and no `latest` is pushed.
+- The production override changes images only, with one required variable `SECURO_CUSTOM_TAG` (`${...:?}`): a
+  missing tag stops the deploy, and moving between custom releases is one variable. Coolify takes one compose
+  file per resource, so `render.py` merges upstream's file with our overrides without interpolating into
+  `fork/deploy/coolify/*.yml`, and `check.sh` fails when they are stale after an upstream sync.
+- Health checks and limits start in staging only; production keeps upstream's settings until staging has run on
+  them.
+- Rollback A (keeps data): `alembic downgrade fork@<previous fork head>` with the new image, then the previous
+  images; back to stock `alembic downgrade fork@f000` then `alembic downgrade fork@f000-1`, which removes the
+  empty root. Always `fork@`: a bare `f000-1` resolves to `131` and Alembic then also downgrades every upstream
+  migration above `131` (checked against Alembic's revision logic in the #2 deep review). Rollback B: restore the
+  pre-deploy `pg_dump -Fc` (read to the end before anything is stopped) into a side database, swap it in, restore
+  the volumes. `record.py` says which applies: a release that moved upstream's line since the previous release
+  (or, for a return to stock, past the fork root's parent) can only be restored.
+Rehearsed on synthetic data in #2 (DEPLOY.md, Rehearsal).
+
 ## D-014 Upstream sync: one script, a thin workflow, proposals only (2026-11-26, #3)
 
 Upstream releases every few days and the fork must stay cheap to upgrade. `fork/tools/sync_upstream.py` (stdlib,
