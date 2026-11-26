@@ -1,0 +1,88 @@
+# Fork-only (docs/fork/UPSTREAM.md, D-014): checks daily for a new stable upstream Securo release and proposes the
+# sync as a pull request, or an issue when the merge conflicts. All logic is in fork/tools/sync_upstream.py, which
+# never resolves a conflict, force-pushes, merges a pull request, tags or deploys. This file only schedules it.
+name: Fork upstream sync
+
+on:
+  schedule:
+    - cron: "17 7 * * *"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Stable upstream tag to sync to (empty: the newest release)"
+        required: false
+        default: ""
+      dry_run:
+        description: "Report only: push nothing, write nothing on GitHub"
+        type: boolean
+        default: false
+
+# contents: fast-forward upstream-main and push sync/<tag>; pull-requests and issues: the proposal;
+# actions: dispatch ci.yml on the sync branch, since a pull request opened by this token starts no workflow run.
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: write
+
+concurrency:
+  group: fork-upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Upstream sync
+    if: github.repository == 'delarosa1312/securo-custom'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    services:
+      # Scratch database for `alembic upgrade heads` (main's heads first, then the merge's).
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: sync
+          POSTGRES_PASSWORD: sync
+          POSTGRES_DB: sync
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sync"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      # FORK_SYNC_TOKEN is optional: a fine-grained token with the workflows permission, needed only to push a
+      # release that changes upstream workflow files. Without it the job opens an issue asking for a local run.
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.FORK_SYNC_TOKEN || github.token }}
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.13.0"
+          enable-cache: true
+          cache-dependency-glob: |
+            backend/uv.lock
+            backend/pyproject.toml
+            backend/.python-version
+
+      - name: Propose the sync
+        env:
+          GH_TOKEN: ${{ secrets.FORK_SYNC_TOKEN || github.token }}
+          HAS_SYNC_TOKEN: ${{ secrets.FORK_SYNC_TOKEN != '' }}
+          TAG: ${{ inputs.tag }}
+          DRY_RUN: ${{ inputs.dry_run }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          args=(--out "$RUNNER_TEMP/fork-sync" --alembic-db "postgresql+asyncpg://sync:sync@127.0.0.1:5432/sync")
+          if [ "$DRY_RUN" != "true" ]; then args+=(--apply); fi
+          if [ -n "$TAG" ]; then args+=(--tag "$TAG"); fi
+          if [ "$HAS_SYNC_TOKEN" != "true" ]; then args+=(--dispatch-ci); fi
+          python3 fork/tools/sync_upstream.py "${args[@]}"
