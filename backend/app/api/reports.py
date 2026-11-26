@@ -17,7 +17,7 @@ from app.schemas.report import (
     ReportResponse,
 )
 from app.services import category_statement_service, plugin_report_service, report_service
-from app.fork.budget_forecast_api import guard_budget_forecast
+from app.fork.budget_forecast_api import guard_cash_flow_request
 from app.fork.budget_forecast_schemas import CashFlowBudgetResponse
 
 router = APIRouter(prefix="/api/reports", tags=["reports"])
@@ -191,8 +191,7 @@ async def get_cash_flow(
     ctx: WorkspaceContext = Depends(current_workspace),
     session: AsyncSession = Depends(get_async_session),
 ):
-    if budget_forecast:
-        guard_budget_forecast(request, baseline)
+    guard_cash_flow_request(request, baseline, budget_forecast)
     return await report_service.get_cash_flow_report(
         session, ctx.workspace.id, ctx.user_id, months, interval, ctx.user.primary_currency,
         baseline=baseline, account_ids=account_ids, budget_forecast=budget_forecast,
