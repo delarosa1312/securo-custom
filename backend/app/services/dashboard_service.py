@@ -220,6 +220,7 @@ async def _get_recurring_projections(
     )
 
     projections = []
+    today = app_today()
     for rec in recurring_list:
         # Compute occurrences from the nominal pointer; linked rows are
         # filtered explicitly below because the pointer can lag materialization.
@@ -241,6 +242,8 @@ async def _get_recurring_projections(
         )
         for occ_date, report_date in occurrences:
             if (rec.id, occ_date) in materialized_occurrences:
+                continue
+            if occ_date <= today:  # fork F-006 (Q12): counts only once it is a row
                 continue
             for part_category_id, part_amount in parts:
                 projections.append({

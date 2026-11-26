@@ -270,7 +270,7 @@ async def generate_cashflow_forecast(
             start=r.next_occurrence,
             frequency=r.frequency,
             end_date=r.end_date,
-            range_start=today,
+            range_start=today + timedelta(days=1),  # fork F-006 (Q12): today's counts once it is a row
             range_end=end_date + timedelta(days=1),
             intended_day=r.day_of_month or r.start_date.day,
             weekend_adjustment=r.weekend_adjustment,

@@ -167,10 +167,70 @@ async def calendar_row_moves(session, workspace_id, today, grid_start, grid_end,
 
 
 async def calendar_claim_moves(session, workspace_id, today, grid_start, grid_end, primary_currency: str):
-    """Open invoice claims for a calendar grid: (seed for the days between today and the grid, moves per day)."""
+    """Open invoice claims for a calendar grid: (seed for the days between today and the grid, listed claims).
+
+    Each listed claim is ``(due date, signed amount in the primary currency, calendar item)``: the calendar
+    lists every claim it counts (Q13), as "Invoice <number> (expected)".
+    """
     from datetime import timedelta
+
+    from app.services import invoice_forecast_service
+    from app.services.fx_rate_service import convert
 
     first_projected = today + timedelta(days=1)
     seed = sum((await claim_moves(session, workspace_id, first_projected, grid_start, primary_currency)).values())
-    moves = await claim_moves(session, workspace_id, max(grid_start, first_projected), grid_end, primary_currency)
-    return seed, moves
+    start = max(grid_start, first_projected)
+    if start >= grid_end:
+        return seed, []
+    claims = await invoice_forecast_service.claims_in_range(session, workspace_id, start, grid_end)
+    numbers = await _invoice_numbers(session, workspace_id, {c.invoice_id for c in claims if c.invoice_id})
+    listed = []
+    for claim in claims:
+        converted, _ = await convert(session, claim.signed, claim.currency, primary_currency)
+        number = numbers.get(claim.invoice_id)
+        listed.append((claim.due_date, float(converted), _claim_item(claim, abs(float(converted)), number)))
+    return seed, listed
+
+
+def invoice_label(number) -> str:
+    """The English label; the web app shows its own translation from ``invoice_number``."""
+    return f"Invoice {number} (expected)" if number else "Invoice (expected)"
+
+
+def _claim_item(claim, amount_primary: float, number):
+    from app.schemas.transaction_calendar import TransactionCalendarItem
+
+    return TransactionCalendarItem(
+        kind="projected",
+        date=claim.due_date,
+        description=invoice_label(number),
+        amount=float(claim.amount),
+        amount_primary=amount_primary,
+        currency=claim.currency,
+        type="credit" if claim.direction == "receivable" else "debit",
+        source="invoice",
+        invoice_id=claim.invoice_id,
+        invoice_number=number,
+    )
+
+
+async def _invoice_numbers(session, workspace_id, invoice_ids) -> dict:
+    """Each invoice's number as a person reads it (`invoice_document`): an import's own reference, or the prefix
+    it was issued with plus the sequence. Reads the settings row without creating it."""
+    from app.models.invoice import Invoice, InvoiceSettings
+
+    if not invoice_ids:
+        return {}
+    invoices = (await session.execute(select(Invoice).where(Invoice.id.in_(invoice_ids)))).scalars().all()
+    settings = (await session.execute(
+        select(InvoiceSettings).where(InvoiceSettings.workspace_id == workspace_id)
+    )).scalar_one_or_none()
+    live_prefix = (settings.number_prefix if settings else None) or ""
+    numbers = {}
+    for invoice in invoices:
+        if invoice.origin == "imported":
+            numbers[invoice.id] = invoice.external_number or None
+        elif invoice.number is not None:
+            prefix = (invoice.snapshot.get("number_prefix") if invoice.snapshot else live_prefix) or ""
+            numbers[invoice.id] = f"{prefix}{invoice.number}"
+    return numbers

@@ -25,10 +25,10 @@ where "Kept differences" below says otherwise.
 | --- | --- |
 | Posted rows | on their date, at the full amount, including transfer legs and rows excluded from P&L (they move a balance even when they stay out of income and expense bars) |
 | Pending rows and future-dated posted rows (installments, rows generated ahead) | on their own date, even when a bill date or a reporting date lists them later; one dated today or earlier is not in the balance yet and counts tomorrow, the first projected day |
-| Recurring occurrences | on their date while the rule is active, from the day after today; an occurrence that already exists as a row counts once, as that row |
+| Recurring occurrences | on their date while the rule is active, from the day after today; one dated today or earlier counts only once it is a row (Q12), in balances, month totals and budgets alike; an occurrence that already exists as a row counts once, as that row |
 | Rules treated as transfers ("Investments", one account only) | move the balance on their date; never in income and expense bars |
 | Rules on a closed account, rules in an ignored category, ignored rows | never |
-| Open receivable invoices (claims) | on the due date, all accounts only (a claim has no account until it is paid) |
+| Open invoices (claims) | on the due date, all accounts only (a claim has no account until it is paid); the calendar lists each one as "Invoice <number> (expected)" (Q13; "Invoice (expected)" for an agreement period not invoiced yet) |
 | Connected accounts | the provider's balance is taken as it is; our own recurring placeholder rows always count; the provider's own pending rows dated today or earlier never count (the provider figure may already hold them), later ones count on their date |
 | Foreign currency | into the viewer's currency; while rates do not move after a row or rule was stamped, every view gives the same figure (see Known limits) |
 
@@ -60,8 +60,9 @@ Each one answers a different question than the other views, so making it equal w
   `opening_balance`) shows in the level, never as a day's movement. Loans stay out.
 - **Budgets** count spending, not balances: posted and scheduled spending per category, scheduled refunds and
   credits netting against it (Q9), and a category's net spending never below zero.
-- **Upcoming** lists recurring occurrences only (not pending rows or installments).
-- **Calendar claims** move the balance and the day's projected totals but have no item row of their own.
+- **Upcoming** lists recurring occurrences only (not pending rows or installments). Asked for a whole month it
+  still lists that month's occurrences dated today or earlier that were never generated: it is a list, not a
+  balance, and a proper overdue list belongs to F-005.
 - **Calendar date basis.** With the "reporting" basis the calendar lists a row on its reporting date; its balance
   still moves on the row's own date, as in the other views.
 - **Group splits.** Balance views move by the full amount of a row; P&L views (bars, budgets) use the user's share.
@@ -71,6 +72,11 @@ Each one answers a different question than the other views, so making it equal w
   card, chart and calendar; the Cash Flow converts it.
 
 ## Known limits
+
+- **Overdue occurrences drop out (Q12).** Nothing dated today or earlier counts until it is a row. A bill whose
+  rule has automatic generation off and was forgotten leaves every projection once its date passes, until it is
+  generated (the Generate button) or entered by hand. Counting it instead would count it twice whenever it was
+  paid by a hand-typed row the rule does not know about. A list of overdue occurrences belongs to F-005.
 
 - **Connected accounts, past days.** A provider's balance may or may not already hold its own pending rows, and
   each view guesses that differently for days before today. Compared from tomorrow on.
@@ -95,6 +101,8 @@ Each one answers a different question than the other views, so making it equal w
 - `test_predictive_scheduled.py` (detected pattern against a pending row, switched-off account, overdue rows, card
   spending, refunds and bill payments, detector scope), `test_projection_rate_lookups.py`,
   `test_projection_reconciliation_postgres.py` (the harness on PostgreSQL),
-  `test_budget_forecast_report.py` (scheduled and recurring refunds), `test_net_worth_order.py`,
-  `frontend/src/fork/projection-consistency/upcoming-widget.test.tsx` (workspace date).
+  `test_budget_forecast_report.py` (scheduled and recurring refunds, occurrences dated today or earlier),
+  `test_calendar_invoice_items.py` (invoice rows), `test_net_worth_order.py`,
+  `frontend/src/fork/projection-consistency/upcoming-widget.test.tsx` (workspace date),
+  `calendar-item-description.test.ts` (invoice row in English and pt-BR).
 - `test_projection_table.py` prints the full view-by-date table when `FORK_F006_TABLE` is set (diagnostic only).

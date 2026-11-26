@@ -20,8 +20,10 @@ from tests.fork._budget_data import pin_today
 
 @pytest.mark.asyncio
 async def test_transaction_calendar_combines_actual_projected_and_balances(
-    session: AsyncSession, test_user, test_workspace
+    session: AsyncSession, test_user, test_workspace, monkeypatch
 ):
+    # Fork F-006 (Q12): projected occurrences count only after today; pinned before this test's dates.
+    pin_today(monkeypatch, date(2026, 7, 9))
     account = Account(
         id=uuid.uuid4(),
         user_id=test_user.id,
@@ -463,8 +465,11 @@ async def test_transaction_calendar_skips_closed_account_recurring_projections(
 
 @pytest.mark.asyncio
 async def test_transaction_calendar_splits_mixed_day_and_keeps_combined_totals(
-    session: AsyncSession, test_user, test_workspace
+    session: AsyncSession, test_user, test_workspace, monkeypatch
 ):
+    # Fork F-006 (Q12): today is the 15th. The posted rows are actual; today's occurrences count only once
+    # they are rows, so a posted row and a virtual occurrence never share a day any more.
+    pin_today(monkeypatch, date(2026, 7, 15))
     account = Account(
         id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
         name="Person", type="checking", balance=Decimal("0"), currency="BRL",
@@ -504,18 +509,20 @@ async def test_transaction_calendar_splits_mixed_day_and_keeps_combined_totals(
     july_15 = next(day for day in calendar.days if day.date == date(2026, 7, 15))
     assert july_15.actual_income == 400.0
     assert july_15.actual_expense == 120.0
-    assert july_15.projected_income == 80.0
-    assert july_15.projected_expense == 50.0
+    assert july_15.projected_income == 0.0
+    assert july_15.projected_expense == 0.0
     # Combined totals stay the sum of both buckets for backwards compatibility.
-    assert july_15.income == 480.0
-    assert july_15.expense == 170.0
-    assert july_15.ending_balance == 310.0
+    assert july_15.income == 400.0
+    assert july_15.expense == 120.0
+    assert july_15.ending_balance == 280.0
 
 
 @pytest.mark.asyncio
 async def test_transaction_calendar_transfer_buckets_stay_out_of_activity(
-    session: AsyncSession, test_user, test_workspace
+    session: AsyncSession, test_user, test_workspace, monkeypatch
 ):
+    # Fork F-006 (Q12): projected occurrences count only after today; pinned before this test's dates.
+    pin_today(monkeypatch, date(2026, 7, 10))
     checking = Account(
         id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
         name="Checking", type="checking", balance=Decimal("0"), currency="BRL",
@@ -580,8 +587,10 @@ async def test_transaction_calendar_transfer_buckets_stay_out_of_activity(
 
 @pytest.mark.asyncio
 async def test_transaction_calendar_opening_balance_and_ignored_category(
-    session: AsyncSession, test_user, test_workspace
+    session: AsyncSession, test_user, test_workspace, monkeypatch
 ):
+    # Fork F-006 (Q12): projected occurrences count only after today; pinned before this test's dates.
+    pin_today(monkeypatch, date(2026, 7, 5))
     account = Account(
         id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
         name="Person", type="checking", balance=Decimal("0"), currency="BRL",
@@ -642,11 +651,13 @@ async def test_transaction_calendar_opening_balance_and_ignored_category(
 
 @pytest.mark.asyncio
 async def test_transaction_calendar_ignored_projection_matches_posted_balance(
-    session: AsyncSession, test_user, test_workspace
+    session: AsyncSession, test_user, test_workspace, monkeypatch
 ):
     """A projected ignored occurrence must land on the same balance its posted
     sibling produces. Otherwise the calendar promises a future balance the app
     reverts the moment the recurring becomes a real transaction."""
+    # Fork F-006 (Q12): projected occurrences count only after today; pinned before this test's dates.
+    pin_today(monkeypatch, date(2026, 7, 7))
     account = Account(
         id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
         name="Checking", type="checking", balance=Decimal("0"), currency="BRL",
@@ -704,8 +715,10 @@ async def test_transaction_calendar_ignored_projection_matches_posted_balance(
 
 @pytest.mark.asyncio
 async def test_transaction_calendar_uses_effective_weekend_date_and_balance(
-    session: AsyncSession, test_user, test_workspace
+    session: AsyncSession, test_user, test_workspace, monkeypatch
 ):
+    # Fork F-006 (Q12): projected occurrences count only after today; pinned before this test's dates.
+    pin_today(monkeypatch, date(2026, 6, 30))
     account = Account(
         id=uuid.uuid4(),
         user_id=test_user.id,
@@ -768,11 +781,14 @@ async def test_transaction_calendar_weekend_balance_matches_overlapping_views(
     session: AsyncSession,
     test_user,
     test_workspace,
+    monkeypatch,
     nominal_date: date,
     weekend_adjustment: str,
     effective_date: date,
     comparison_date: date,
 ):
+    # Fork F-006 (Q12): projected occurrences count only after today; pinned before this test's dates.
+    pin_today(monkeypatch, date(2026, 7, 2))
     account = Account(
         id=uuid.uuid4(),
         user_id=test_user.id,
@@ -832,8 +848,10 @@ async def test_transaction_calendar_weekend_balance_matches_overlapping_views(
 
 @pytest.mark.asyncio
 async def test_transaction_calendar_overlap_carries_virtual_occurrences(
-    session: AsyncSession, test_user, test_workspace
+    session: AsyncSession, test_user, test_workspace, monkeypatch
 ):
+    # Fork F-006 (Q12): projected occurrences count only after today; pinned before this test's dates.
+    pin_today(monkeypatch, date(2026, 7, 2))
     account = Account(
         id=uuid.uuid4(),
         user_id=test_user.id,
@@ -902,8 +920,10 @@ async def test_transaction_calendar_overlap_carries_virtual_occurrences(
 
 @pytest.mark.asyncio
 async def test_transaction_calendar_does_not_carry_ignored_virtual_occurrences(
-    session: AsyncSession, test_user, test_workspace
+    session: AsyncSession, test_user, test_workspace, monkeypatch
 ):
+    # Fork F-006 (Q12): projected occurrences count only after today; pinned before this test's dates.
+    pin_today(monkeypatch, date(2026, 7, 2))
     account = Account(
         id=uuid.uuid4(),
         user_id=test_user.id,
@@ -977,8 +997,10 @@ async def test_transaction_calendar_does_not_carry_ignored_virtual_occurrences(
 
 @pytest.mark.asyncio
 async def test_transaction_calendar_carries_more_than_occurrence_safety_limit(
-    session: AsyncSession, test_user, test_workspace
+    session: AsyncSession, test_user, test_workspace, monkeypatch
 ):
+    # Fork F-006 (Q12): projected occurrences count only after today; pinned before this test's dates.
+    pin_today(monkeypatch, date(2019, 12, 31))
     account = Account(
         id=uuid.uuid4(),
         user_id=test_user.id,
@@ -1332,9 +1354,11 @@ async def test_transaction_calendar_badges_a_split_whose_lines_are_all_transfers
 
 @pytest.mark.asyncio
 async def test_transaction_calendar_projected_split_with_all_lines_ignored_is_not_a_transfer(
-    session: AsyncSession, test_user, test_workspace
+    session: AsyncSession, test_user, test_workspace, monkeypatch
 ):
     """The same `all([])` case on a recurring template (#993)."""
+    # Fork F-006 (Q12): projected occurrences count only after today; pinned before this test's dates.
+    pin_today(monkeypatch, date(2026, 6, 30))
     account = Account(
         id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
         name="Person", type="checking", balance=Decimal("0"), currency="BRL",

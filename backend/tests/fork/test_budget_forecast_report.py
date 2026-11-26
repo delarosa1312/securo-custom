@@ -302,7 +302,8 @@ async def test_last_day_of_month_projects_nothing_for_it(session, test_user, tes
     report = await _report(session, test_workspace, test_user, budget_forecast=True)
 
     nov = report.budget_forecast.months[0]
-    assert nov.days == 0 and nov.remaining == Decimal("110.00") and nov.forecast == Decimal("0.00")
+    # Streaming's rule of the 28th is overdue and not a row (Q12): its 30 is remaining budget again, not scheduled.
+    assert nov.days == 0 and nov.remaining == Decimal("140.00") and nov.forecast == Decimal("0.00")
     assert report.budget_forecast.total == Decimal("850.00")
 
 

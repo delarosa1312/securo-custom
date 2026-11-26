@@ -8,7 +8,8 @@ type Point = { date: string; value: number }
 type Report = { trend: Point[] }
 type Summary = { projected_balance_primary: number | null }
 type History = { current: { date?: string; balance: number | null }[] }
-type Calendar = { days: { date: string; ending_balance: number }[] }
+type CalendarItem = { description: string; source: string | null; invoice_number?: string | null }
+type Calendar = { days: { date: string; ending_balance: number; items: CalendarItem[] }[] }
 type Forecast = { daily_trajectory: { date: string; ending_balance: string; events: string[] }[] }
 
 const cents = (value: number | string | null | undefined) => Math.round(Number(value) * 100)
@@ -63,6 +64,21 @@ test('F-006 projected balances agree: card, chart, Cash Flow, calendar, predicti
   const accounts = await rest<{ id: string; name: string }[]>(token, 'GET', '/api/accounts')
   const checking = accounts.find((a) => a.name === 'Synthetic Checking')!
 
+  // An open invoice due in two days: every balance view counts it, and the calendar lists it (Q13).
+  const invoiceDue = addDays(today, 2)
+  const invoice = await rest<{ id: string; status: string }>(token, 'POST', '/api/invoices', {
+    origin: 'imported', external_source: 'e2e', external_id: 'f006', external_number: 'NF-F006',
+    issue_date: iso(today), due_date: iso(invoiceDue), currency: 'BRL', total: '350.00',
+  })
+  if (invoice.status === 'draft') await rest(token, 'POST', `/api/invoices/${invoice.id}/issue`)
+  saveEvidence('f006-invoice.rest.json', invoice)
+  // A monthly bill due three days ago, never generated (Q12): it counts nowhere until it is a row.
+  const overdueDay = addDays(today, -3)
+  await rest(token, 'POST', '/api/recurring-transactions', {
+    description: 'Synthetic Overdue bill', amount: '70.00', currency: 'BRL', type: 'debit', frequency: 'monthly',
+    day_of_month: overdueDay.getDate(), start_date: iso(overdueDay), account_id: checking.id, auto_generate: false,
+  })
+
   // 1. REST: the same day gives the same balance in every view, all accounts and checking only.
   const scopes: Record<string, string[] | undefined> = { all: undefined, checking: [checking.id] }
   const restViews: Record<string, Awaited<ReturnType<typeof views>>> = {}
@@ -75,6 +91,20 @@ test('F-006 projected balances agree: card, chart, Cash Flow, calendar, predicti
     allEqual(v.nextMonthEnd, `${scope} ${iso(monthEnd(today, 1))}`)
   }
 
+  // The calendar lists the invoice it counts on its due date.
+  const invoiceMonth = await rest<Calendar>(token, 'GET', `/api/transactions/calendar?month=${monthStart(invoiceDue)}`)
+  const invoiceDay = invoiceMonth.days.find((d) => d.date === iso(invoiceDue))!
+  expect(invoiceDay.items.filter((i) => i.source === 'invoice').map((i) => i.description)).toEqual([
+    'Invoice NF-F006 (expected)',
+  ])
+
+  // The overdue bill is not listed on its past day, and the calendar month around it agrees with the other views.
+  const overdueMonth = await rest<Calendar>(token, 'GET', `/api/transactions/calendar?month=${monthStart(overdueDay)}`)
+  const overdueItems = overdueMonth.days.flatMap((d) => d.items.map((i) => ({ date: d.date, ...i })))
+    .filter((i) => i.description === 'Synthetic Overdue bill')
+  saveEvidence('f006-overdue.rest.json', overdueItems)
+  expect(overdueItems.filter((i) => i.date <= iso(today))).toEqual([])
+
   // 2. The predictive forecast counts the seed's pending rows once, on their dates (none before F-006).
   const horizon = 45
   const forecast = await rest<Forecast>(token, 'GET', `/api/forecast/cashflow?horizon_days=${horizon}&include_discretionary=false`)
@@ -85,6 +115,9 @@ test('F-006 projected balances agree: card, chart, Cash Flow, calendar, predicti
   expect(eventsOn('Synthetic Freelance invoice')).toEqual([iso(addDays(today, 20))])
   // Yesterday's pending card row is not in the card balance yet: it counts tomorrow.
   expect(eventsOn('Synthetic Bistro (pending)')).toEqual([iso(addDays(today, 1))])
+  // The overdue bill counts only from its next date, a month after the missed one.
+  const nextOverdue = new Date(overdueDay.getFullYear(), overdueDay.getMonth() + 1, overdueDay.getDate())
+  expect(eventsOn('Synthetic Overdue bill')).toEqual([iso(nextOverdue)])
 
   // 3. MCP gives the same figures as REST.
   const mcp = await mcpClient(token)
@@ -117,6 +150,13 @@ test('F-006 projected balances agree: card, chart, Cash Flow, calendar, predicti
   const end0 = iso(monthEnd(today))
   expect(cents(screenCalendar.days.find((d) => d.date === end0)?.ending_balance)).toBe(restViews.all.thisMonthEnd.calendar)
   await settle(page)
+  if (monthStart(invoiceDue) === monthStart(today)) {
+    // Open the invoice's day: the day panel lists "Invoice NF-F006 (expected)".
+    const dayNumber = String(invoiceDue.getDate())
+    await page.locator('[role="button"]:not(.text-muted-foreground)')
+      .filter({ has: page.getByText(dayNumber, { exact: true }) }).first().click()
+    await expect(page.getByText('Invoice NF-F006 (expected)').first()).toBeVisible()
+  }
   await screenshot(page, 'f006-2-calendar', true)
 
   const cashFlowOnScreen = page.waitForResponse(seen('/api/reports/cash-flow'))

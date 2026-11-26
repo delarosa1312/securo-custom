@@ -265,8 +265,10 @@ async def get_transaction_calendar(
             session, workspace_id, app_today(), grid_start, grid_end, primary_currency,
         )
         start_balance += claims_seed
-        for due, signed in claims.items():
+        for due, signed, claim_item in claims:
             balance_deltas[due] = balance_deltas.get(due, 0.0) + signed
+            days[due].projected_count += 1
+            days[due].items.append(claim_item)
             if signed > 0:
                 days[due].income += signed
                 days[due].projected_income += signed
@@ -634,6 +636,7 @@ async def _project_recurring_items(
     items: list[tuple[TransactionCalendarItem, float, list[tuple[bool, float]]]] = []
     deltas: dict[date, float] = {}
     carried_delta = 0.0
+    tomorrow = app_today() + timedelta(days=1)
     for rec in recurring_rows:
         if rec.account_id is None:
             continue
@@ -672,9 +675,11 @@ async def _project_recurring_items(
             parts = [(is_transfer, 1.0)]
         if not is_ignored:
             skip = frozenset(day for rec_id, day in materialized if rec_id == rec.id)
-            carried_delta += _count_occurrences_before(rec, start, skip) * signed_delta
+            # Fork F-006 (Q12): an occurrence dated today or earlier counts only once it is a row.
+            carried = _count_occurrences_before(rec, start, skip) - _count_occurrences_before(rec, tomorrow, skip)
+            carried_delta += max(carried, 0) * signed_delta
         for occ_date in occurrences:
-            if (rec.id, occ_date) in materialized:
+            if (rec.id, occ_date) in materialized or occ_date < tomorrow:
                 continue
             item = TransactionCalendarItem(
                 kind="projected",

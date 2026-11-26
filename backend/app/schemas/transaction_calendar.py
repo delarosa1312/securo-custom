@@ -33,6 +33,10 @@ class TransactionCalendarItem(BaseModel):
     #: balance, so the row needs its own marker: without one the day card
     #: shows 0/0 while its ending balance jumps, and nothing explains why.
     exclude_from_pnl: bool = False
+    #: Fork F-006 (Q13): an open invoice the balance counts on its due date
+    #: (`source` "invoice"); the number is None for an agreement period.
+    invoice_id: Optional[uuid.UUID] = None
+    invoice_number: Optional[str] = None
 
 
 class TransactionCalendarDay(BaseModel):

@@ -33,6 +33,7 @@ from app.services.report_service import (
     get_income_expenses_report,
     get_net_worth_report,
 )
+from tests.fork._budget_data import pin_today
 
 
 # ---------------------------------------------------------------------------
@@ -317,23 +318,25 @@ async def test_income_expenses_excludes_opening_but_keeps_closed_history(
     assert bd["expenses"] == 300.0
 
 
-async def test_income_expenses_with_recurring_projection(session, test_user, test_workspace):
+async def test_income_expenses_with_recurring_projection(session, test_user, test_workspace, monkeypatch):
     """Recurring projections are layered into income / expenses + composition."""
     cat = await _make_category(session, test_user.id, "Rent", color="#00F")
     acct = await _make_account(session, test_user.id, "IE Rec")
     today = date.today()
     month_start = today.replace(day=1)
     # Recurring projections are layered per-month over the [start, today]
-    # window. Anchor occurrences at the 1st of the current month so they
-    # land inside that window regardless of what day "today" is.
+    # window. Fork F-006 (Q12): an occurrence dated today or earlier counts
+    # only once it is a row, so today is pinned to the 1st and the
+    # occurrences fall on the 2nd, inside that month whatever the real date.
+    pin_today(monkeypatch, month_start)
     await _make_recurring(
         session, test_user.id, acct.id, 800, "debit",
-        frequency="monthly", next_occurrence=month_start,
+        frequency="monthly", next_occurrence=month_start + timedelta(days=1),
         category_id=cat.id,
     )
     await _make_recurring(
         session, test_user.id, acct.id, 1500, "credit",
-        frequency="monthly", next_occurrence=month_start,
+        frequency="monthly", next_occurrence=month_start + timedelta(days=1),
     )
 
     report = await get_income_expenses_report(
@@ -1177,6 +1180,8 @@ async def test_preset_month_window_keeps_projections(
 
     today = date(2026, 11, 8)
     monkeypatch.setattr(report_service, 'app_today', lambda: today)
+    # Fork F-006 (Q12): every module's today, so the rule of the 20th is still ahead for the projections too.
+    pin_today(monkeypatch, today)
     currency = test_user.primary_currency
     account = await _make_account(session, test_user.id, 'This month', currency=currency)
     await _add_txn(session, test_user.id, account.id, 100, 'credit', date(2026, 11, 2),

@@ -73,6 +73,8 @@ class Claim:
     amount: Decimal
     #: `receivable` (money owed to the workspace) or `payable`.
     direction: str
+    #: The invoice it comes from; None for an agreement period not invoiced yet.
+    invoice_id: Optional[uuid.UUID] = None  # fork F-006 (Q13): the calendar lists it
 
     @property
     def signed(self) -> Decimal:
@@ -164,7 +166,7 @@ async def claims_in_range(
         outstanding = Decimal(str(row.outstanding))
         installments = schedules.get(row.id)
         if not installments:
-            claims.append(Claim(row.due_date, currency, outstanding, row.direction))
+            claims.append(Claim(row.due_date, currency, outstanding, row.direction, row.id))
             continue
         # Settled money covers the schedule first-to-last; what is left
         # of each installment is promised for that installment's date.
@@ -174,7 +176,7 @@ async def claims_in_range(
             covered -= share
             left = installment.amount - share
             if left > ZERO and range_start <= installment.due_date < range_end:
-                claims.append(Claim(installment.due_date, currency, left, row.direction))
+                claims.append(Claim(installment.due_date, currency, left, row.direction, row.id))
 
     # Periods of a recurring agreement that no invoice answers for yet.
     # Same money as the invoice the job will emit for them, and the two

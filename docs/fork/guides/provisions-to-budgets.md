@@ -86,9 +86,9 @@ they are, since the budget is not part of those accounts' flows. Over MCP, `get_
 
 ## Known limits
 
-- An unmaterialized recurring occurrence dated earlier this month (a schedule that was due but never generated)
-  counts as scheduled on the Budgets page but is not in the Cash Flow forecast, so that amount is in neither.
-  Generate or post it to fix the forecast. Issue #8 works on these differences.
+- A recurring occurrence dated today or earlier that was never generated (a schedule with automatic generation
+  off) counts nowhere until it is a row: not as scheduled, not in any projected balance. Its amount is remaining
+  budget again, so with budgets on it is spread over the days left. Generate or post it to count it as itself.
 - In accrual mode the Cash Flow places recurring card purchases on their purchase date while budgets count them
   in the bill's month; at the last month of the horizon this can count one card cycle of those schedules twice.
 - Spending you share with someone in a group counts at your share, as on the Budgets page, while the account
