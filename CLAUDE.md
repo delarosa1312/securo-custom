@@ -49,11 +49,12 @@ that matches your task. GitHub issues on `delarosa1312/securo-custom` are the sp
 ## Commands
 
 ```bash
-fork/tools/check.sh [backend|frontend]      # ruff, ty, both migration chains, eslint, tsc; prints only failures
+fork/tools/check.sh [backend|frontend|migrations]  # ruff, ty, both migration chains, eslint, tsc; only failures
 fork/tools/test.sh backend [pytest args]    # capped workers, one heavy run at a time across sessions
 fork/tools/test.sh frontend [vitest args]
 fork/tools/new-branch.sh <issue> <slug>     # issue-linked branch from origin/main, switched to in this worktree
 fork/tools/stack.sh up|seed|status|logs|down  # local synthetic stack: :13000 app, :18000 API, :18765 MCP
+python3 fork/tools/sync_upstream.py [--apply]  # upstream release sync proposal (UPSTREAM.md); dry run by default
 cd fork/e2e && FORK_E2E_OUT=~/scratch/securo-custom/<issue>/e2e npx playwright test   # E2E (PROCESS.md)
 ```
 

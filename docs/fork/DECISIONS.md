@@ -96,3 +96,20 @@ the same rule (converted balance, or the native one with `fx_fallback` when no r
 pin both to the issue's worked example so they cannot drift apart unnoticed. The route lives under
 `/api/accounts` so the existing `accounts` token scope covers it; it is mounted before upstream's accounts
 router because `/{account_id}` would otherwise take the path.
+
+## D-014 Upstream sync: one script, a thin workflow, proposals only (2026-11-26, #3)
+
+Upstream releases every few days and the fork must stay cheap to upgrade. `fork/tools/sync_upstream.py` (stdlib,
+`git` and `gh`) holds all the logic and runs the same way by hand and in `.github/workflows/fork-upstream-sync.yml`,
+which only schedules it. It merges stable release tags only, never upstream `main`; fast-forwards `upstream-main`
+only with a plain push when a release is synced; trial-merges in a temporary detached worktree; and proposes a pull
+request (clean) or an issue (conflicts, or a push GitHub refused). It never resolves a conflict, force-pushes,
+merges, tags or deploys, and a dry run is the default. Overlaps are computed from git (files both upstream and
+`main` changed since the base tag) and matched to the patch inventory, so a hook missing from the inventory shows up
+as drift instead of being missed. The migration check upgrades a scratch database with `main` first and the merge
+second, the deploy path. Security comes from upstream advisories first and release-note words second, since
+`v0.19.0` fixed an advisory its notes do not mention.
+Consequences: with the default token most syncs need one local command, because GitHub refuses that token's pushes
+of workflow-file changes (an optional `FORK_SYNC_TOKEN` removes the step); a pull request opened by the default
+token starts no CI, so the tool dispatches `ci.yml` (`actions: write`); the closed proposals' branches stay until
+Matheus deletes them.

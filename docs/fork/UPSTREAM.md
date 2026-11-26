@@ -15,28 +15,65 @@ budget: every row is something to carry through each sync until its removal cond
 
 ## Sync procedure, per upstream stable release
 
-1. `git fetch upstream --tags`; fast-forward `upstream-main` to `upstream/main` and push it.
-2. `git switch -c sync/<tag> origin/main`, then `git merge --no-ff <tag>` (the tag, not upstream `main`).
-3. Conflicts: resolve only the mechanical ones. A conflict in money logic or in a migration stops the sync and
-   becomes a question for Matheus, with both sides shown.
-4. Overlap review: read the release notes and the diff of every upstream file in the patch inventory. Where
-   upstream now does what a patch does, retire the patch (remove the hook and the fork code, keep the data path
-   described in the patch's removal condition).
-5. Migration graph: `python3 backend/scripts/check_migration_chain.py` (upstream line), the fork-line check, then
-   on a scratch PostgreSQL: fresh `alembic upgrade heads`, and upgrade of a database at the previous custom
-   release. Two heads exactly: upstream's number and our `f...`.
-6. `fork/tools/check.sh`, the full backend and frontend suites through `fork/tools/test.sh`, then the E2E
-   scenarios of every active patch. Compare failures with upstream's own CI for that tag before calling one ours.
-7. Pull request `sync/<tag>` to `main` with: the release notes summary, conflicts and how each was resolved,
-   patches retired, migration result, test and E2E results. Never merge a failing sync.
-8. After merge: tag `v<tag>-custom.<n>`, build images, staging first, production only with Matheus's yes.
+`fork/tools/sync_upstream.py` does steps 1 to 3 and the checks of 5, and writes the report for 4 and 7 (D-014).
+The daily workflow runs it with `--apply`; run it by hand the same way. Rehearsed in a scratch clone on 2026-11-26
+(#3): a base of `v0.21.0` plus our patches synced to `v0.22.0`, a deliberate conflict, and today's state.
 
-Security releases (a GitHub advisory, or a release whose notes mention a vulnerability) are synchronized first,
-ahead of feature work.
+1. Base and target: the base is the newest stable tag (`vX.Y.Z`, no suffix) already in `origin/main`; the target is
+   the newest published upstream release after it (drafts and prereleases skipped). No newer release: report and
+   change nothing, even when upstream `main` has moved (it holds unreleased work, often migrations).
+2. Mirror: `git fetch upstream --tags`, then fast-forward `upstream-main` to `upstream/main` with a plain push
+   (only when `origin/upstream-main` is an ancestor; a plain push refuses anything else). Done only when a release
+   is synced.
+3. Trial merge: `sync/<tag>` from `origin/main`, `git merge --no-ff <tag>` (the tag, never upstream `main`). The tool
+   merges in a temporary detached worktree, so no local branch moves. When `sync/<tag>` already exists it builds on
+   it and merges the newer `main` in, so the branch only moves forward.
+4. Conflicts: the tool resolves none and pushes nothing; it opens an issue listing each file as fork hook (patch
+   inventory row), migration, changed by the fork but not inventoried, or upstream only. Resolve only the
+   mechanical ones by hand (`python3 fork/tools/sync_upstream.py --tag <tag> --keep-worktree` leaves the conflicted
+   merge in a worktree). A conflict in money logic or in a migration stops the sync and becomes a question for
+   Matheus, with both sides shown.
+5. Overlap review: the report lists every upstream file changed in the range that `main` also changed since the
+   base tag (from git, so it cannot miss a hook), with its patch inventory row, or "not in the patch inventory"
+   when the inventory has drifted. Read the release notes and the diff of each. Where upstream now does what a patch
+   does, retire the patch (remove the hook and the fork code, keep the data path described in its removal
+   condition).
+6. Migration graph: both chain checks (`fork/tools/check.sh migrations`), then on a scratch PostgreSQL: `alembic
+   upgrade heads` with `main` on an empty database, then `upgrade heads` with the merge on that same database (the
+   deploy path), `alembic heads` and `current`. After a sync that brings upstream migrations there are exactly two
+   heads, upstream's number and our `f...` (rehearsal: `131` and `f001`). The workflow runs this on a PostgreSQL
+   service; by hand pass `--alembic-db postgresql+asyncpg://...` of a throwaway, empty database.
+7. `fork/tools/check.sh`, the full backend and frontend suites through `fork/tools/test.sh`, then the E2E scenarios
+   of every active patch. Compare failures with upstream's own CI for that tag before calling one ours. A pull
+   request opened with the workflow's default token starts no workflow run, so the tool dispatches `ci.yml` on the
+   sync branch.
+8. Pull request `sync/<tag>` to `main` (the tool opens it): security callout first, release notes summary (sections
+   with item counts and the "Before you update" section of every release in the range), overlaps, new upstream
+   migrations, migration results. Add the conflicts resolved, patches retired, and the test and E2E results. Never
+   merge a failing sync.
+9. After merge: tag `v<tag>-custom.<n>`, build images, staging first, production only with Matheus's yes.
 
-Automation: `.github/workflows/fork-upstream-sync.yml` checks daily for a new stable upstream tag, does steps 1 and
-2 on a `sync/<tag>` branch and opens the pull request (or an issue listing the conflicts when the merge does not
-apply cleanly). It never resolves conflicts, merges or deploys.
+One open proposal at a time, marked `upstream-sync` and by a hidden `fork-sync` marker in its body: a rerun for the
+same tag updates it; a clean pull request for a newer tag closes older proposals with a link (their branches stay;
+deleting is Matheus's call); a conflict issue for a newer tag leaves an older clean pull request open, since
+merging it first shrinks the conflict.
+
+Security releases are synchronized first, ahead of feature work. The signal is a published upstream advisory whose
+patched version is inside the sync range, or release notes naming a vulnerability, a CVE or GHSA id, XSS, CSRF or
+SSRF. Advisories come first because notes may say nothing: `v0.19.0` fixed GHSA-jxf3-r7wj-8frj (high, stored XSS)
+and its notes do not mention it. The proposal gets the `security` label, `[security]` in its title and the callout
+at the top.
+
+Automation: `.github/workflows/fork-upstream-sync.yml` runs the tool daily (07:17 UTC) and on manual dispatch
+(inputs: a tag, dry run). It contains no merge, tag, release or deploy step. Token: GitHub refuses a push by the
+default `GITHUB_TOKEN` that creates or updates a file under `.github/workflows/`, and upstream changed its workflow
+files in three of the four releases before `v0.22.0`. Then the job opens an issue asking for a local run
+(`python3 fork/tools/sync_upstream.py --tag <tag> --apply`, with a `gh` login that has the `workflow` scope).
+An optional secret `FORK_SYNC_TOKEN` (fine-grained, this repository only: Contents, Pull requests, Issues and
+Workflows read and write) removes that step, and a pull request it opens starts CI by itself.
+
+Quoted upstream text in a proposal has `@user` and `#123` put in code, so it pings nobody and links none of our
+issues. Nothing is ever written to upstream.
 
 ## Migrations
 
@@ -58,6 +95,7 @@ ids `f001`, `f002`, ...), each depending only on the upstream revision it needs.
 | `ci.yml` (CI) | active | backend shards, frontend, checks on pull requests to `main` and pushes to `main` |
 | `approve-fork-runs`, `fast-lane`, `label-guard`, `pr-labels`, `stale-queue`, `downloads-badge` | disabled in the Actions settings (`gh workflow disable`) | upstream maintainer automation; files stay identical to upstream |
 | `prepare-release`, `release` (Build and Push Docker Images) | disabled | upstream release and image publishing; ours come with the release issue |
+| `fork-upstream-sync.yml` (Fork upstream sync) | fork workflow, active once Actions are enabled | daily upstream release check and sync proposal (#3, D-014) |
 
 Repository variables `APPROVE_FORK_RUNS`, `FAST_LANE`, `STALE_QUEUE` are `off`. The repository is a GitHub fork, and
 GitHub does not run any workflow in a fork until the owner enables them once: Actions tab, button "I understand my
