@@ -63,10 +63,11 @@ function ChangeFromForm({
     changes: (split ? plan.values : { ...plan.values, ...plan.series }) as Partial<RecurringTransaction>,
   }
   const preview = useQuery({
-    queryKey: ['recurring', 'lifecycle', 'change-preview', schedule.id, body],
+    queryKey: ['recurring-lifecycle-preview', 'change', schedule.id, body],
     queryFn: () => recurringLifecycle.changeFrom(schedule.id, { ...body, preview: true }),
     enabled: !split || fromDate > schedule.start_date,
     retry: false,
+    gcTime: 0,
   })
   const apply = useMutation({
     mutationFn: async () => {

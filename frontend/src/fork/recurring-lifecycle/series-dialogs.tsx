@@ -145,10 +145,11 @@ function EndForm({ schedule, onClose }: { schedule: LifecycleRecurring; onClose:
   const [deleteScheduled, setDeleteScheduled] = useState(true)
   const valid = lastDate >= schedule.start_date
   const preview = useQuery({
-    queryKey: ['recurring', 'lifecycle', 'end-preview', schedule.id, lastDate],
+    queryKey: ['recurring-lifecycle-preview', 'end', schedule.id, lastDate],
     queryFn: () => recurringLifecycle.end(schedule.id, { last_date: lastDate, delete_scheduled: false, preview: true }),
     enabled: valid,
     retry: false,
+    gcTime: 0,
   })
   const apply = useApply(
     () => recurringLifecycle.end(schedule.id, { last_date: lastDate, delete_scheduled: deleteScheduled, preview: false }),
@@ -187,9 +188,10 @@ function TrashForm({ schedule, onClose }: { schedule: LifecycleRecurring; onClos
   const { t } = useTranslation()
   const [deleteScheduled, setDeleteScheduled] = useState(true)
   const preview = useQuery({
-    queryKey: ['recurring', 'lifecycle', 'trash-preview', schedule.id],
+    queryKey: ['recurring-lifecycle-preview', 'trash', schedule.id],
     queryFn: () => recurringLifecycle.trash(schedule.id, { delete_scheduled: false, preview: true }),
     retry: false,
+    gcTime: 0,
   })
   const apply = useApply(
     () => recurringLifecycle.trash(schedule.id, { delete_scheduled: deleteScheduled, preview: false }),
@@ -226,9 +228,10 @@ function TrashForm({ schedule, onClose }: { schedule: LifecycleRecurring; onClos
 function PurgeForm({ schedule, onClose }: { schedule: LifecycleRecurring; onClose: () => void }) {
   const { t } = useTranslation()
   const preview = useQuery({
-    queryKey: ['recurring', 'lifecycle', 'purge-preview', schedule.id],
+    queryKey: ['recurring-lifecycle-preview', 'purge', schedule.id],
     queryFn: () => recurringLifecycle.purge(schedule.id, true),
     retry: false,
+    gcTime: 0,
   })
   const apply = useApply(
     () => recurringLifecycle.purge(schedule.id, false),
@@ -255,9 +258,10 @@ function RestoreForm({ schedule, onClose }: { schedule: LifecycleRecurring; onCl
   const { t } = useTranslation()
   const dateLocale = useDateLocale()
   const preview = useQuery({
-    queryKey: ['recurring', 'lifecycle', 'restore-preview', schedule.id],
+    queryKey: ['recurring-lifecycle-preview', 'restore', schedule.id],
     queryFn: () => recurringLifecycle.restore(schedule.id, true),
     retry: false,
+    gcTime: 0,
   })
   const apply = useApply(
     () => recurringLifecycle.restore(schedule.id, false),
