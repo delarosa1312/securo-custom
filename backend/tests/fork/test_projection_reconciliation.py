@@ -18,7 +18,10 @@ from tests.fork import _projection_data as pdata
 from tests.fork import _projection_views as views
 
 D = date
-DATES = (D(2026, 10, 31), D(2026, 11, 10), D(2026, 11, 20), D(2026, 11, 25), D(2026, 11, 30), D(2026, 12, 31))
+DATES = (
+    D(2026, 10, 31), D(2026, 11, 10), D(2026, 11, 20), D(2026, 11, 25), D(2026, 11, 30), D(2026, 12, 1),
+    D(2026, 12, 31),
+)
 BASE = {"all": Decimal("1500.00"), "checking": Decimal("1000.00")}
 
 # component -> [(date, amount, account)]; "checking" moves show in both scopes, anything else only in "all".
@@ -42,6 +45,10 @@ MOVES: dict[str, list[tuple[date, str, str]]] = {
     "pending_overdue_and_today": [(D(2026, 11, 21), "-50", "checking"), (D(2026, 11, 21), "-20", "checking")],
     # The provider's 300 holds its own pending 15; our recurring placeholder of 25 is not in it.
     "connected_pending": [(D(2026, 9, 1), "300", "bank"), (D(2026, 11, 21), "-25", "bank")],
+    "month_edges": [
+        (D(2026, 11, 30), "-20", "checking"), (D(2026, 11, 30), "-5", "checking"),
+        (D(2026, 12, 1), "-10", "checking"), (D(2026, 12, 1), "-7", "checking"), (D(2026, 12, 30), "-20", "checking"),
+    ],
 }
 
 # Moves a view leaves out by design (docs/fork/PROJECTIONS.md), keyed by (component, view).

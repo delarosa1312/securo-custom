@@ -164,6 +164,14 @@ async def _pending_overdue_and_today(b: Base):
     await b.txn(b.checking, "20", date(2026, 11, 20), status="pending")
 
 
+async def _month_edges(b: Base):
+    """Items on the last day of a month and the first of the next: each lands in its own month."""
+    await b.rule(b.checking, "20", date(2026, 11, 30))
+    await b.rule(b.checking, "10", date(2026, 12, 1))
+    await b.txn(b.checking, "5", date(2026, 11, 30), status="pending")
+    await b.txn(b.checking, "7", date(2026, 12, 1), status="pending")
+
+
 COMPONENTS = {
     "base": None,
     "pending_future": _pending_future,
@@ -185,6 +193,7 @@ COMPONENTS = {
     "foreign_pending": _foreign_pending,
     "connected_pending": _connected_pending,
     "pending_overdue_and_today": _pending_overdue_and_today,
+    "month_edges": _month_edges,
 }
 
 
