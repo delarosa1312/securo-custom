@@ -227,7 +227,8 @@ async def generate_cashflow_forecast(
         lookback_days=180,
         reference_date=today,
         exclude_recurring_ids=manual_recurring_ids,
-        exclude_account_ids=left_out,  # fork F-001
+        # Fork F-001, F-006: patterns only from the accounts the forecast follows.
+        exclude_account_ids=left_out | await fork_scheduled.uncovered_account_ids(session, workspace_id, covered),
     )
     unconverted_currencies.update(detected_res.unconverted_currencies)
 

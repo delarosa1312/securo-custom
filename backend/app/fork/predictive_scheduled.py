@@ -8,6 +8,10 @@ accounts:
 
 - pending rows and future-dated rows (installments, generate-ahead rows) count
   on their date; one dated today or earlier counts tomorrow, as in the Cash Flow;
+- on a card, spending counts when it happens after today. A card row dated today
+  or earlier is debt already owed, pending or posted. Card credits (refunds) and
+  both legs of a transfer touching a card (bill payments) do not count: paying
+  the bill would count the spending a second time;
 - a recurring occurrence that already exists as a row counts once, as that row;
 - rules count only on covered accounts and outside ignored categories;
 - a detected pattern does not count again where a row of the same merchant and
@@ -117,10 +121,16 @@ async def scheduled_rows(
     if not covered:
         return found
     tomorrow = today + timedelta(days=1)
-    for tx in await _get_forecast_transactions(
+    rows = await _get_forecast_transactions(
         session, workspace_id, date.min, end_date + timedelta(days=1), list(covered),
-    ):
+    )
+    card_pairs = {tx.transfer_pair_id for tx in rows if tx.transfer_pair_id and _on_card(tx)}
+    for tx in rows:
         if tx.is_ignored or (tx.category and tx.category.is_ignored):
+            continue
+        if tx.transfer_pair_id in card_pairs and tx.transfer_pair_id is not None:
+            continue
+        if _on_card(tx) and (tx.type == "credit" or tx.date <= today):
             continue
         connected = tx.account is not None and tx.account.connection_id is not None
         # A provider balance may already hold its own pending rows; never a placeholder of ours.
@@ -143,6 +153,18 @@ async def scheduled_rows(
             amount=abs(amount),
         ))
     return found
+
+
+def _on_card(tx) -> bool:
+    return tx.account is not None and tx.account.type == CARD_TYPE
+
+
+async def uncovered_account_ids(session: AsyncSession, workspace_id: uuid.UUID, covered: set[Any]) -> set[uuid.UUID]:
+    """Every account of the workspace the forecast does not follow, closed ones included."""
+    from app.models.account import Account
+
+    result = await session.execute(select(Account.id).where(Account.workspace_id == workspace_id))
+    return {account_id for account_id in result.scalars().all() if account_id not in covered}
 
 
 async def materialized_occurrences(session, workspace_id, rule_ids, today: date, end_date: date):

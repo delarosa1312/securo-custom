@@ -120,25 +120,14 @@ async def get_transaction_calendar(
                 session, tx, primary_currency
             )
 
-    # Fork F-006: a pending row dated today or earlier is not in the balance
-    # yet; like the dashboard card and Cash Flow, it counts from tomorrow.
-    from app.fork.projection_consistency import overdue_pending
-    tomorrow = app_today() + timedelta(days=1)
-    overdue = await overdue_pending(session, workspace_id, app_today(), requested_account_ids)
-    overdue_ids = {tx.id for tx in overdue}
-    overdue_delta = 0.0
-    for tx in overdue:
-        delta = await _signed_balance_delta_primary(session, tx, primary_currency)
-        if tx.account is not None and tx.account.connection_id is not None:
-            # A placeholder: rebuilding the provider balance back to the seed
-            # day took it out as if the provider held it; put it back.
-            if tx.date >= grid_start and grid_start <= app_today():
-                start_balance += delta
-        elif tx.date < grid_start:
-            start_balance -= delta  # the seed above holds it on its own date
-        overdue_delta += delta
-    if tomorrow < grid_start:
-        start_balance += overdue_delta
+    # Fork F-006: real forecast rows move the balance on their own date (overdue
+    # pending rows from tomorrow), whatever date basis lists them.
+    from app.fork import projection_consistency as fork_projection
+    seed_delta, forecast_deltas = await fork_projection.calendar_row_moves(
+        session, workspace_id, app_today(), grid_start, grid_end, requested_account_ids,
+        lambda tx: _signed_balance_delta_primary(session, tx, primary_currency),
+    )
+    start_balance += seed_delta
 
     actual_rows = await _load_actual_transactions(
         session,
@@ -202,7 +191,6 @@ async def get_transaction_calendar(
         range_date_col=activity_date_col,
         future_date_col=Transaction.date,
     )
-    forecast_deltas: dict[date, float] = {}
     for tx in forecast_rows:
         activity_date = _activity_date(tx, date_basis, accounting_mode)
         if activity_date not in days:
@@ -233,16 +221,6 @@ async def get_transaction_calendar(
         day.items.append(
             _forecast_item(tx, activity_date, amount_primary, is_transfer, ignored)
         )
-
-        # Forecast rows are excluded from actual deltas but included in the
-        # projected walk. The seed already contains forecast rows before the
-        # grid; rows inside the grid are applied here.
-        if not ignored and tx.id not in overdue_ids:
-            forecast_deltas[tx.date] = forecast_deltas.get(tx.date, 0.0) + await _signed_balance_delta_primary(
-                session, tx, primary_currency
-            )
-    if grid_start <= tomorrow < grid_end and overdue_delta:
-        forecast_deltas[tomorrow] = forecast_deltas.get(tomorrow, 0.0) + overdue_delta
 
     projected_items, projected_deltas, carried_projected_delta = await _project_recurring_items(
         session,
@@ -283,14 +261,11 @@ async def get_transaction_calendar(
         balance_deltas[delta_date] = balance_deltas.get(delta_date, 0.0) + delta
     # Fork F-006: open invoice claims, as the dashboard card and Cash Flow count them.
     if requested_account_ids is None:
-        from app.fork.projection_consistency import claim_moves
-        first_projected = app_today() + timedelta(days=1)
-        start_balance += sum((await claim_moves(
-            session, workspace_id, first_projected, grid_start, primary_currency,
-        )).values())
-        for due, signed in (await claim_moves(
-            session, workspace_id, max(grid_start, first_projected), grid_end, primary_currency,
-        )).items():
+        claims_seed, claims = await fork_projection.calendar_claim_moves(
+            session, workspace_id, app_today(), grid_start, grid_end, primary_currency,
+        )
+        start_balance += claims_seed
+        for due, signed in claims.items():
             balance_deltas[due] = balance_deltas.get(due, 0.0) + signed
             if signed > 0:
                 days[due].income += signed

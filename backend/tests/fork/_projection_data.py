@@ -1,7 +1,7 @@
 """F-006 reconciliation dataset: one base plus one component at a time. Synthetic data only.
 
 Today is pinned to Friday 2026-11-20. The base is a checking account opened
-with 1,000.00 and a savings account opened with 500.00 on 2026-10-01, so every
+with 1,000.00 and a savings account opened with 500.00 on 2026-09-01, so every
 view starts from 1,500.00 and a component's effect is the difference from it.
 """
 from __future__ import annotations

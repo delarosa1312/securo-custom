@@ -72,12 +72,17 @@ async def scheduled_balance_moves(
     moves: dict = {}
     if start >= end:
         return moves
+    # A rule repeats the same amount: convert each (amount, currency) once, not per occurrence.
+    converted_by_key: dict = {}
     for proj in await _get_recurring_projections(
         session, workspace_id, start, end, account_ids, include_transfer_like=True,
     ):
         if proj["account_id"] in skip_account_ids:
             continue
-        converted, _ = await convert(session, Decimal(str(proj["amount"])), proj["currency"], primary_currency)
+        key = (str(proj["amount"]), proj["currency"])
+        if key not in converted_by_key:
+            converted_by_key[key], _ = await convert(session, Decimal(key[0]), key[1], primary_currency)
+        converted = converted_by_key[key]
         signed = float(converted) if proj["type"] == "credit" else -float(converted)
         moves[proj["date"]] = moves.get(proj["date"], 0.0) + signed
     if account_ids is None:
@@ -120,3 +125,52 @@ async def overdue_pending(session, workspace_id, today, account_ids) -> list:
             continue
         rows.append(tx)
     return rows
+
+
+async def calendar_row_moves(session, workspace_id, today, grid_start, grid_end, account_ids, signed_delta):
+    """The calendar's balance moves from real forecast rows: (seed correction, moves per day).
+
+    The calendar lists a row on its reporting date, but a balance moves on the
+    row's own date, as in every other view; a row billed after the grid still
+    moves it. ``signed_delta`` is the calendar's own conversion (an awaitable per row).
+    The seed (`_balance_at` with pending rows) holds overdue manual rows on their
+    own dates; they move tomorrow instead. A connected account's placeholder was
+    taken out of the seed as if the provider held it, so it goes back first.
+    """
+    from datetime import timedelta
+
+    from app.services.dashboard_service import _get_forecast_transactions
+
+    tomorrow = today + timedelta(days=1)
+    seed = 0.0
+    moves: dict = {}
+    overdue = await overdue_pending(session, workspace_id, today, account_ids)
+    overdue_delta = 0.0
+    for tx in overdue:
+        delta = await signed_delta(tx)
+        if tx.account is not None and tx.account.connection_id is not None:
+            if tx.date >= grid_start and grid_start <= today:
+                seed += delta
+        elif tx.date < grid_start:
+            seed -= delta
+        overdue_delta += delta
+    if tomorrow < grid_start:
+        seed += overdue_delta
+    elif tomorrow < grid_end and overdue_delta:
+        moves[tomorrow] = overdue_delta
+    overdue_ids = {tx.id for tx in overdue}
+    for tx in await _get_forecast_transactions(session, workspace_id, grid_start, grid_end, account_ids):
+        if tx.id in overdue_ids or tx.is_ignored or (tx.category and tx.category.is_ignored):
+            continue
+        moves[tx.date] = moves.get(tx.date, 0.0) + await signed_delta(tx)
+    return seed, moves
+
+
+async def calendar_claim_moves(session, workspace_id, today, grid_start, grid_end, primary_currency: str):
+    """Open invoice claims for a calendar grid: (seed for the days between today and the grid, moves per day)."""
+    from datetime import timedelta
+
+    first_projected = today + timedelta(days=1)
+    seed = sum((await claim_moves(session, workspace_id, first_projected, grid_start, primary_currency)).values())
+    moves = await claim_moves(session, workspace_id, max(grid_start, first_projected), grid_end, primary_currency)
+    return seed, moves
