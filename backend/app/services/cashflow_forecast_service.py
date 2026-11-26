@@ -22,6 +22,7 @@ from app.schemas.forecast import (
 )
 from app.core.config import get_settings
 from app.fork.available_balance import counts_as_available, left_out_account_ids
+from app.fork import predictive_scheduled as fork_scheduled
 from app.services import account_service, recurring_detector_service
 from app.services.fx_rate_service import convert_or_none
 from app.services.recurring_transaction_service import get_occurrences_in_range
@@ -201,6 +202,9 @@ async def generate_cashflow_forecast(
     credit_card_balance = credit_card_balance.quantize(Decimal("0.01"))
     # Fork F-001: what belongs to these accounts stays out of the whole simulation.
     left_out = left_out_account_ids(accounts)
+    # Fork F-006: the scheduled layer the other projections count (app/fork/predictive_scheduled.py).
+    covered = fork_scheduled.covered_account_ids(accounts)
+    ignored_categories = await fork_scheduled.ignored_category_ids(session, workspace_id)
 
     # 2. Fetch manual recurring transactions in workspace
     rec_query = select(RecurringTransaction).where(
@@ -234,6 +238,9 @@ async def generate_cashflow_forecast(
     # What each manual rule looks like to the detector, to drop detected
     # patterns that are the same bill under another payee name.
     manual_rules: list[dict] = []
+    materialized = await fork_scheduled.materialized_occurrences(  # fork F-006
+        session, workspace_id, manual_recurring_ids, today, end_date,
+    )
     for r in manual_recurrings:
         if r.account_id in left_out:  # fork F-001
             continue
@@ -256,6 +263,8 @@ async def generate_cashflow_forecast(
         if amount is None:
             unconverted_currencies.add(r.currency)
             continue
+        if not fork_scheduled.rule_counts(r, covered, ignored_categories):  # fork F-006
+            continue
         occurrences = get_occurrences_in_range(
             start=r.next_occurrence,
             frequency=r.frequency,
@@ -266,6 +275,8 @@ async def generate_cashflow_forecast(
             weekend_adjustment=r.weekend_adjustment,
         )
         for occ_date in occurrences:
+            if (r.id, occ_date) in materialized:  # fork F-006
+                continue
             manual_events.setdefault(occ_date, []).append(
                 (r.description or "Scheduled Recurring", direction, amount)
             )
@@ -295,8 +306,18 @@ async def generate_cashflow_forecast(
                 item.average_amount,
                 item.next_expected_date,
                 item.cadence,
+                item.normalized_key.lower(),
             )
         )
+
+    # Fork F-006: pending and future-dated rows on the covered accounts.
+    scheduled = await fork_scheduled.scheduled_rows(
+        session, workspace_id, covered, today, end_date, base_currency,
+        recurring_detector_service.normalize_merchant_name, convert_or_none,
+    )
+    unconverted_currencies.update(scheduled.unconverted_currencies)
+    for row_date, row_events in scheduled.events().items():
+        manual_events.setdefault(row_date, []).extend(row_events)
 
     # 4. Calculate historical daily baseline discretionary burn
     daily_discretionary_burn = Decimal("0.00")
@@ -369,8 +390,10 @@ async def generate_cashflow_forecast(
 
         # Find recurring items matching today
         day_items = list(manual_events.get(sim_date, []))
-        for name, direction, amount, anchor, cadence in schedule_items:
-            if _date_matches_cadence(sim_date, anchor, cadence):
+        for name, direction, amount, anchor, cadence, name_key in schedule_items:
+            if _date_matches_cadence(sim_date, anchor, cadence) and not scheduled.covers(
+                name_key, direction, sim_date, cadence, _names_match,  # fork F-006
+            ):
                 day_items.append((name, direction, amount))
         for name, direction, amount in day_items:
             if direction == FlowDirectionEnum.INFLOW:
