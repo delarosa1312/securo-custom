@@ -2070,7 +2070,10 @@ async def get_balance_history(
             for tx in carried_forecasts:
                 if tx.is_ignored or (tx.category and tx.category.is_ignored):
                     continue
-                if tx.account and tx.account.connection_id and tx.status == "pending" and tx.date <= today:
+                if (
+                    tx.account and tx.account.connection_id and tx.status == "pending" and tx.date <= today
+                    and tx.source != "recurring"  # fork F-006: our placeholder is not in the provider's figure
+                ):
                     continue
                 current_start += await _signed_forecast_amount_primary(
                     session, tx, primary_currency

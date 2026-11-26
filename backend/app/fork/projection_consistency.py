@@ -98,3 +98,25 @@ async def claim_moves(session, workspace_id, start, end, primary_currency: str) 
         converted, _ = await convert(session, claim.signed, claim.currency, primary_currency)
         moves[claim.due_date] = moves.get(claim.due_date, 0.0) + float(converted)
     return moves
+
+
+async def overdue_pending(session, workspace_id, today, account_ids) -> list:
+    """Pending rows dated today or earlier that the current balance does not hold yet.
+
+    The views count them from tomorrow, the first projected day. A connected
+    account's own pending rows are left out: its provider balance may already
+    hold them (the dashboard card's rule); a placeholder generated from a
+    schedule is not in it and counts.
+    """
+    from datetime import date, timedelta
+
+    from app.services.dashboard_service import _get_forecast_transactions
+
+    rows = []
+    for tx in await _get_forecast_transactions(session, workspace_id, date.min, today + timedelta(days=1), account_ids):
+        if tx.status != "pending" or tx.is_ignored or (tx.category and tx.category.is_ignored):
+            continue
+        if tx.account is not None and tx.account.connection_id is not None and tx.source != "recurring":
+            continue
+        rows.append(tx)
+    return rows

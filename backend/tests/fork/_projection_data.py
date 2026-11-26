@@ -144,6 +144,26 @@ async def _foreign_pending(b: Base):
     await b.txn(usd, "10", date(2026, 11, 25), status="pending", amount_primary="50")
 
 
+async def _connected_pending(b: Base):
+    from app.models.bank_connection import BankConnection
+
+    conn = await data.add(b.session, BankConnection(
+        id=uuid.uuid4(), user_id=b.user.id, workspace_id=b.ws.id, provider="test", external_id="synthetic",
+        institution_name="Synthetic Bank", credentials={}, status="active",
+        created_at=datetime.now(timezone.utc),
+    ))
+    bank = await data.account(b.session, b.user, b.ws, "Bank", connection_id=conn.id)
+    bank.balance = Decimal("300")  # the provider's figure, which holds its own pending row below
+    await b.session.commit()
+    await b.txn(bank, "15", date(2026, 11, 18), status="pending")
+    await b.txn(bank, "25", date(2026, 11, 18), status="pending", source="recurring")
+
+
+async def _pending_overdue_and_today(b: Base):
+    await b.txn(b.checking, "50", date(2026, 11, 10), status="pending")
+    await b.txn(b.checking, "20", date(2026, 11, 20), status="pending")
+
+
 COMPONENTS = {
     "base": None,
     "pending_future": _pending_future,
@@ -163,6 +183,8 @@ COMPONENTS = {
     "card_purchase_and_installment": _card_purchase_and_installment,
     "invoice_claim": _invoice_claim,
     "foreign_pending": _foreign_pending,
+    "connected_pending": _connected_pending,
+    "pending_overdue_and_today": _pending_overdue_and_today,
 }
 
 

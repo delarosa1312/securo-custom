@@ -12,6 +12,7 @@ from decimal import Decimal
 
 import pytest
 
+from app.services import admin_service
 from tests.fork import _budget_data as data
 from tests.fork import _projection_data as pdata
 from tests.fork import _projection_views as views
@@ -37,6 +38,10 @@ MOVES: dict[str, list[tuple[date, str, str]]] = {
     "card_purchase_and_installment": [(D(2026, 11, 18), "-120", "card"), (D(2026, 12, 18), "-120", "card")],
     "invoice_claim": [(D(2026, 11, 27), "400", "claim")],
     "foreign_pending": [(D(2026, 9, 1), "500", "usd"), (D(2026, 11, 25), "-50", "usd")],
+    # Not in the balance yet: counted from tomorrow, the first projected day.
+    "pending_overdue_and_today": [(D(2026, 11, 21), "-50", "checking"), (D(2026, 11, 21), "-20", "checking")],
+    # The provider's 300 holds its own pending 15; our recurring placeholder of 25 is not in it.
+    "connected_pending": [(D(2026, 9, 1), "300", "bank"), (D(2026, 11, 21), "-25", "bank")],
 }
 
 # Moves a view leaves out by design (docs/fork/PROJECTIONS.md), keyed by (component, view).
@@ -46,6 +51,10 @@ LEFT_OUT = {
     # A claim has no account until it is paid.
     ("invoice_claim", "predictive"): {"claim"},
 }
+# A connected account's past days depend on what its provider figure holds, which each view guesses
+# differently (docs/fork/PROJECTIONS.md, known differences): compared from tomorrow on.
+FROM_TOMORROW = {"connected_pending"}
+
 # Card debt already owed is not due today: the predictive forecast starts without it.
 PREDICTIVE_SKIPS_PAST = {"card"}
 
@@ -65,15 +74,33 @@ def expected(component: str, scope: str, view: str, on: date) -> Decimal:
     return total
 
 
+# In accrual mode the Cash Flow is a bill-date cash view: a card purchase leaves on its bill's due date
+# (docs/fork/PROJECTIONS.md). Every other component must not care about the mode.
+ACCRUAL_CASES = [c for c in MOVES if c != "card_purchase_and_installment"]
+
+
 @pytest.mark.parametrize("component", list(MOVES))
 @pytest.mark.parametrize("scope", ["all", "checking"])
 @pytest.mark.asyncio
 async def test_views_reconcile(session, test_user, test_workspace, monkeypatch, component, scope):
+    await _reconcile(session, test_user, test_workspace, monkeypatch, component, scope)
+
+
+@pytest.mark.parametrize("component", ACCRUAL_CASES)
+@pytest.mark.asyncio
+async def test_views_reconcile_in_accrual_mode(session, test_user, test_workspace, monkeypatch, component):
+    await admin_service.set_app_setting(session, "credit_card_accounting_mode", "accrual")
+    await _reconcile(session, test_user, test_workspace, monkeypatch, component, "all")
+
+
+async def _reconcile(session, test_user, test_workspace, monkeypatch, component, scope):
     data.pin_today(monkeypatch)
     base = await pdata.build(session, test_user, test_workspace, component)
     account_ids = None if scope == "all" else [base.checking.id]
     wrong = []
     for on in DATES:
+        if component in FROM_TOMORROW and on <= data.TODAY:
+            continue
         got = await views.read_all(session, test_workspace, test_user, on, account_ids)
         for view, value in got.items():
             if value is None:
