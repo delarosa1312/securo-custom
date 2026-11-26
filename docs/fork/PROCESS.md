@@ -19,6 +19,8 @@ A brief's "done" never drops a step unless Matheus said so.
 
 1. **Branch**: `fork/tools/new-branch.sh <issue> <slug>` in the session's worktree. Never `git checkout -b`: a
    branch is linked to its issue only when GitHub creates it.
+   The worktree lives at `.worktrees/<issue>-<slug>` inside the main checkout (ignored by upstream's
+   `.gitignore`); the main checkout itself stays on `main`.
 2. **Investigate, then plan before coding**, posted as one comment on the issue:
    - what upstream already does (reproduce the limitation at `v0.22.0`, cite code) and what is missing;
    - the approach by the preference order in `CLAUDE.md`, with each hook into an upstream file named;

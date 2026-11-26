@@ -67,6 +67,7 @@ First time in a checkout: `cd backend && uv sync --all-extras`, `cd frontend && 
 ## Sessions
 
 - One issue, one session, one worktree, one scoped pull request to `main`. The coordinator session integrates.
+  Worktrees: `.worktrees/<issue>-<slug>` in the main checkout, which stays on `main`.
 - Follow the order of work in `docs/fork/PROCESS.md`; a brief's "done" never drops a step.
 - Notes live in the memory folder `~/.claude/projects/-home-Unified-Documents-Projects-Personal-securo-custom/memory/`
   (`MEMORY.md`, `active-work.md`, one `issue-<n>-<slug>.md` per issue). Keep your issue note current at each
