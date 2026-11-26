@@ -16,8 +16,9 @@ budget: every row is something to carry through each sync until its removal cond
 ## Sync procedure, per upstream stable release
 
 `fork/tools/sync_upstream.py` does steps 1 to 3 and the checks of 5, and writes the report for 4 and 7 (D-014).
-The daily workflow runs it with `--apply`; run it by hand the same way. Rehearsed in a scratch clone on 2026-11-26
-(#3): a base of `v0.21.0` plus our patches synced to `v0.22.0`, a deliberate conflict, and today's state.
+The daily workflow runs it; by hand, `python3 fork/tools/sync_upstream.py` reports and `--apply` writes. Rehearsed
+in a scratch clone on 2026-11-26 (#3): a base of `v0.21.0` plus our patches synced to `v0.22.0`, a deliberate
+conflict, its resolution by hand, and today's state.
 
 1. Base and target: the base is the newest stable tag (`vX.Y.Z`, no suffix) already in `origin/main`; the target is
    the newest published upstream release after it (drafts and prereleases skipped). No newer release: report and
@@ -28,11 +29,13 @@ The daily workflow runs it with `--apply`; run it by hand the same way. Rehearse
 3. Trial merge: `sync/<tag>` from `origin/main`, `git merge --no-ff <tag>` (the tag, never upstream `main`). The tool
    merges in a temporary detached worktree, so no local branch moves. When `sync/<tag>` already exists it builds on
    it and merges the newer `main` in, so the branch only moves forward.
-4. Conflicts: the tool resolves none and pushes nothing; it opens an issue listing each file as fork hook (patch
-   inventory row), migration, changed by the fork but not inventoried, or upstream only. Resolve only the
+4. Conflicts: the tool resolves none and pushes nothing (its merges run with `rerere` off, so a recorded resolution
+   is never replayed); it opens an issue, or writes into the tag's open pull request, listing each file as fork hook
+   (patch inventory row), migration, changed by the fork but not inventoried, or upstream only. Resolve only the
    mechanical ones by hand (`python3 fork/tools/sync_upstream.py --tag <tag> --keep-worktree` leaves the conflicted
-   merge in a worktree). A conflict in money logic or in a migration stops the sync and becomes a question for
-   Matheus, with both sides shown.
+   merge in a worktree) and push the result to `sync/<tag>`. The next run opens the pull request and lists every
+   file where the branch differs from the tool's own merge as "changed by hand", for review. A conflict in money
+   logic or in a migration stops the sync and becomes a question for Matheus, with both sides shown.
 5. Overlap review: the report lists every upstream file changed in the range that `main` also changed since the
    base tag (from git, so it cannot miss a hook), with its patch inventory row, or "not in the patch inventory"
    when the inventory has drifted. Read the release notes and the diff of each. Where upstream now does what a patch
@@ -49,14 +52,20 @@ The daily workflow runs it with `--apply`; run it by hand the same way. Rehearse
    sync branch.
 8. Pull request `sync/<tag>` to `main` (the tool opens it): security callout first, release notes summary (sections
    with item counts and the "Before you update" section of every release in the range), overlaps, new upstream
-   migrations, migration results. Add the conflicts resolved, patches retired, and the test and E2E results. Never
-   merge a failing sync.
+   migrations, migration results, files changed by hand. The tool owns only the block between its markers and
+   rewrites it when something changed; add the conflicts resolved, patches retired, and the test and E2E results
+   below it, where they are kept. A failed migration check puts `[checks failed]` in the title and fails the run.
+   Never merge a failing sync.
 9. After merge: tag `v<tag>-custom.<n>`, build images, staging first, production only with Matheus's yes.
 
-One open proposal at a time, marked `upstream-sync` and by a hidden `fork-sync` marker in its body: a rerun for the
-same tag updates it; a clean pull request for a newer tag closes older proposals with a link (their branches stay;
-deleting is Matheus's call); a conflict issue for a newer tag leaves an older clean pull request open, since
-merging it first shrinks the conflict.
+One open proposal at a time, marked `upstream-sync` and by a hidden `fork-sync` marker in its body:
+- one per tag: the tag's pull request when it has one (a later conflict or refused push is written into it, with
+  `[conflicts]` or `[run locally]` in the title), else its issue. A pull request someone opens from `sync/<tag>` is
+  adopted: the tool adds its block above that text.
+- a newer tag replaces older proposals, pull requests and issues alike, closing them with a link (their branches
+  stay; deleting is Matheus's call).
+- a proposal for a tag that a person closed is not opened again: the run reports it and waits for a newer
+  release (reopen it to resume).
 
 Security releases are synchronized first, ahead of feature work. The signal is a published upstream advisory whose
 patched version is inside the sync range, or release notes naming a vulnerability, a CVE or GHSA id, XSS, CSRF or
@@ -65,7 +74,20 @@ and its notes do not mention it. The proposal gets the `security` label, `[secur
 at the top.
 
 Automation: `.github/workflows/fork-upstream-sync.yml` runs the tool daily (07:17 UTC) and on manual dispatch
-(inputs: a tag, dry run). It contains no merge, tag, release or deploy step. Token: GitHub refuses a push by the
+(inputs: a tag, dry run). It contains no merge, tag, release or deploy step, and runs in two jobs so that the
+release's own code never runs next to a write token. `check` has a read-only token, no persisted credentials and
+the PostgreSQL service: it trial-merges and runs the chain checks and alembic (`--checks-only`), and hands
+`checks.json` on. `propose` has the write permissions and runs only git and `gh` from `main`'s copy of the tool: it
+redoes the merge, refuses unless the tree equals the one `check` tested, then pushes and proposes
+(`--apply --checks-from`). The tool also keeps tokens out of the environment of every command that runs upstream
+code, and its pushes never carry tags (`--no-follow-tags`).
+
+Pull requests by the workflow: GitHub lets `GITHUB_TOKEN` open a pull request only when the repository setting
+"Allow GitHub Actions to create and approve pull requests" (Settings, Actions, General, Workflow permissions) is
+on; it is off here (checked 2026-11-26). While it is off, a clean sync pushes `sync/<tag>` and opens an issue with
+the link that opens the pull request in one click; the next run adopts that pull request and closes the issue.
+
+Token for pushes: GitHub refuses a push by the
 default `GITHUB_TOKEN` that creates or updates a file under `.github/workflows/`, and upstream changed its workflow
 files in three of the four releases before `v0.22.0`. Then the job opens an issue asking for a local run
 (`python3 fork/tools/sync_upstream.py --tag <tag> --apply`, with a `gh` login that has the `workflow` scope).
@@ -85,8 +107,14 @@ on the pull request by itself (no dispatch). To create it:
 5. In the repository: Settings, Secrets and variables, Actions, New repository secret, name `FORK_SYNC_TOKEN`, value
    the token. Deleting the secret returns the workflow to the default token.
 
-Quoted upstream text in a proposal has `@user` and `#123` put in code, so it pings nobody and links none of our
-issues. Nothing is ever written to upstream.
+Quoted upstream text in a proposal has `@user`, `#123`, `owner/repo#123`, `GH-123` and issue or pull request URLs
+put in code (code spans stay as they are), so it pings nobody, links none of our issues and creates no
+cross-reference on upstream. Tool output is quoted in fenced blocks. The tool refuses to run against
+`securo-finance/securo`. Nothing is ever written to upstream.
+
+Not set up, recommended: a ruleset on `main` that requires a pull request (Settings, Rules, Rulesets). Today `main`
+is unprotected, so any token with `contents: write` can push to it; the workflow's write job never does, but a
+ruleset makes that a rule instead of a property of our code.
 
 ## Migrations
 

@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Static checks with upstream's own commands. Prints one line per check and the output of failures only.
 # Usage: fork/tools/check.sh [backend|frontend|migrations]   (default: backend and frontend)
-# migrations: only the two Alembic chain checks, no dependencies needed (the upstream sync runs it).
+# migrations: only the two Alembic chain checks, no dependencies needed (the same two the upstream sync runs).
 set -u
 root="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 what="${1:-all}"

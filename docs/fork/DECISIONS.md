@@ -109,7 +109,13 @@ merges, tags or deploys, and a dry run is the default. Overlaps are computed fro
 as drift instead of being missed. The migration check upgrades a scratch database with `main` first and the merge
 second, the deploy path. Security comes from upstream advisories first and release-note words second, since
 `v0.19.0` fixed an advisory its notes do not mention.
+The workflow runs in two jobs (review of #3): the release's own code (chain checks, uv, alembic) runs only in a
+read-only job, and the write job runs git and `gh` only, redoing the merge and refusing unless its tree equals the
+tested one, so a compromised release cannot use the write token before a person reviews it. The tool owns only a
+marked block of a proposal's body, so notes added by hand survive the daily run, and it lists files a person changed
+on the sync branch instead of calling the merge untouched.
 Consequences: with the default token most syncs need one local command, because GitHub refuses that token's pushes
-of workflow-file changes (an optional `FORK_SYNC_TOKEN` removes the step); a pull request opened by the default
-token starts no CI, so the tool dispatches `ci.yml` (`actions: write`); the closed proposals' branches stay until
-Matheus deletes them.
+of workflow-file changes (an optional `FORK_SYNC_TOKEN` removes the step); while "Allow GitHub Actions to create
+and approve pull requests" is off, a clean sync needs one click to open its pull request; a pull request opened by
+the default token starts no CI, so the tool dispatches `ci.yml` (`actions: write`) and links the run; the closed
+proposals' branches stay until Matheus deletes them.
