@@ -21,6 +21,7 @@ from app.schemas.forecast import (
     SubscriptionStatusEnum,
 )
 from app.core.config import get_settings
+from app.fork.available_balance import counts_as_available
 from app.services import account_service, recurring_detector_service
 from app.services.fx_rate_service import convert_or_none
 from app.services.recurring_transaction_service import get_occurrences_in_range
@@ -170,6 +171,9 @@ async def generate_cashflow_forecast(
     for acc in accounts:
         is_card = acc["type"] == "credit_card"
         if not is_card and acc["type"] not in _LIQUID_ACCOUNT_TYPES:
+            continue
+        # Fork F-001: an account switched out of available money does not fund the runway.
+        if not is_card and not counts_as_available(acc):
             continue
         # Cards on one consolidated credit line each carry the whole line's
         # debt, so the line is counted once, as on the dashboard.
