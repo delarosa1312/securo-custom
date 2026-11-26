@@ -1,19 +1,24 @@
 """F-004 edits after the deep review: a transfer whose account was closed can still be deactivated,
 end-dated or renamed; a split expense turned into a transfer keeps no category; amounts are positive;
-an ordinary placeholder marked as a transfer still meets its bank row. Synthetic data."""
+an ordinary placeholder marked as a transfer still meets its bank row; upstream's unlink, delete and link
+clear a bank duplicate and keep the destination leg. Synthetic data."""
 
 import uuid
-from datetime import timedelta
+from datetime import date, timedelta
 from decimal import Decimal
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import select
 
 import mcp_server.tools  # noqa: F401
+from app.fork.models import RecurringOccurrence
+from app.models.bank_connection import BankConnection
 from app.models.category import Category
 from app.models.recurring_transaction import RecurringTransaction
 from app.models.transaction import Transaction
 from app.services import recurring_match_service
+from app.services import recurring_transaction_service as service
 from mcp_server.auth import CallContext
 from mcp_server.registry import REGISTRY
 from tests.fork._transfer_data import account, next_month_day, transfer_schedule
@@ -134,3 +139,56 @@ async def test_ordinary_placeholder_marked_as_transfer_still_meets_its_bank_row(
         session, checking.id, Decimal("300"), "BRL", "debit", day, "Card bill",
     )
     assert found is not None and found.id == placeholder.id
+
+
+@pytest.mark.asyncio
+async def test_bank_duplicate_cleared_with_upstream_actions_keeps_the_destination_leg(
+    client, auth_headers, session, test_user, test_workspace
+):
+    connection = BankConnection(
+        id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id, provider="test",
+        external_id="synthetic", institution_name="Synthetic bank", credentials={}, status="active",
+    )
+    session.add(connection)
+    await session.flush()
+    checking = await account(session, test_user, test_workspace, "Checking", connection_id=connection.id)
+    savings = await account(session, test_user, test_workspace, "Savings", type_="savings")
+    day = date(2024, 1, 10)
+    rec = await transfer_schedule(session, test_user, test_workspace, checking, savings, start=day)
+    await session.commit()
+    await service.generate_pending(session, test_user.id, up_to=date(2024, 1, 31))
+    legs = list((await session.execute(
+        select(Transaction).where(Transaction.recurring_transaction_id == rec.id)
+    )).scalars().all())
+    debit = next(tx for tx in legs if tx.type == "debit")
+    credit = next(tx for tx in legs if tx.type == "credit")
+    bank_row = Transaction(
+        id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id, account_id=checking.id,
+        description="TED SAVINGS", amount=Decimal("200.00"), currency="BRL", date=day, effective_date=day,
+        type="debit", source="sync", status="posted", external_id="bank-row-1",
+    )
+    session.add(bank_row)
+    await session.commit()
+    pair_id, credit_id, debit_id = debit.transfer_pair_id, credit.id, debit.id
+    session.expunge_all()
+
+    # The screen's "Unlink transfer", then "Delete" on the pending leg, then "Link as transfer".
+    assert (await client.delete(f"/api/connections/transfers/{pair_id}", headers=auth_headers)).status_code == 204
+    assert (await client.delete(f"/api/transactions/{debit_id}", headers=auth_headers)).status_code == 204
+    linked = await client.post(
+        "/api/transactions/link-transfer", json={"transaction_ids": [str(bank_row.id), str(credit_id)]},
+        headers=auth_headers,
+    )
+    assert linked.status_code == 200, linked.text
+
+    rows = {tx.id: tx for tx in (await session.execute(
+        select(Transaction).where(Transaction.date == day, Transaction.source != "opening_balance")
+    )).scalars().all()}
+    assert set(rows) == {bank_row.id, credit_id}
+    assert rows[bank_row.id].transfer_pair_id == rows[credit_id].transfer_pair_id is not None
+    assert rows[credit_id].recurring_transaction_id == rec.id and rows[credit_id].amount == Decimal("200.00")
+    claim = (await session.execute(select(RecurringOccurrence).where(
+        RecurringOccurrence.recurring_transaction_id == rec.id, RecurringOccurrence.occurrence_date == day,
+    ))).scalar_one()
+    assert claim.state == "generated"  # its transaction_id goes NULL on PostgreSQL (ON DELETE SET NULL)
+    assert await service.generate_pending(session, test_user.id, up_to=date(2024, 1, 31)) == 0
