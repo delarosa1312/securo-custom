@@ -62,8 +62,9 @@ One open proposal at a time, marked `upstream-sync` and by a hidden `fork-sync` 
 - one per tag: the tag's pull request when it has one (a later conflict or refused push is written into it, with
   `[conflicts]` or `[run locally]` in the title), else its issue. A pull request someone opens from `sync/<tag>` is
   adopted: the tool adds its block above that text.
-- a newer tag replaces older proposals, pull requests and issues alike, closing them with a link (their branches
-  stay; deleting is Matheus's call).
+- a newer tag replaces older proposals, pull requests and issues alike: the tool marks each `kind=superseded` and
+  closes it with a link (branches stay; deleting is Matheus's call). One a person reopens stays open, for example
+  an older security release to merge before a conflicting newer one.
 - a proposal for a tag that a person closed is not opened again: the run reports it and waits for a newer
   release (reopen it to resume).
 

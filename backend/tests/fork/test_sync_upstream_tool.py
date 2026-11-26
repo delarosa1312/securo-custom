@@ -234,11 +234,11 @@ def test_the_dispatched_ci_run_is_linked_in_the_pull_request_block():
 # ---------------------------------------------------------------- proposals on GitHub (gh faked)
 
 
-def _p(number, tag, is_pr, state="OPEN", body=None, marked=True):
+def _p(number, tag, is_pr, state="OPEN", body=None, marked=True, kind="pr"):
     body = (
         body
         if body is not None
-        else f"<!-- fork-sync tag={tag} kind=pr -->\nx\n<!-- fork-sync:end -->\n"
+        else f"<!-- fork-sync tag={tag} kind={kind} -->\nx\n<!-- fork-sync:end -->\n"
     )
     return sync.Proposal(
         number,
@@ -248,6 +248,7 @@ def _p(number, tag, is_pr, state="OPEN", body=None, marked=True):
         tag,
         body,
         marked,
+        kind,
     )
 
 
@@ -277,11 +278,9 @@ def test_classify_reads_markers_and_adopts_pull_requests_from_sync_branches():
 def test_closed_by_hand():
     assert sync.closed_by_hand([_p(1, "v1.1.0", True, "CLOSED")], "v1.1.0").number == 1
     assert sync.closed_by_hand([_p(2, "v1.1.0", False, "CLOSED")], "v1.1.0").number == 2
-    # The tool closes its own tag's issue when the pull request opens: that is not a person's veto.
-    assert (
-        sync.closed_by_hand([_p(2, "v1.1.0", False, "CLOSED"), _p(3, "v1.1.0", True)], "v1.1.0")
-        is None
-    )
+    # What the tool closed itself carries kind=superseded: that is not a person's veto.
+    closed_by_tool = _p(2, "v1.1.0", False, "CLOSED", kind="superseded")
+    assert sync.closed_by_hand([closed_by_tool], "v1.1.0") is None
     assert sync.closed_by_hand([_p(1, "v1.0.0", True, "CLOSED")], "v1.1.0") is None
 
 
@@ -364,13 +363,28 @@ def test_a_newer_pull_request_replaces_older_proposals_and_its_own_issue(fake_gh
         _p(8, "v1.0.1", True, state="CLOSED"),
     ]
     rep = _publish(fake_gh, "pr", props)
-    assert _verbs(fake_gh.calls) == ["pr create -R", "pr close 3", "issue close 4", "issue close 5"]
+    assert _verbs(fake_gh.calls) == [
+        "pr create -R",
+        "pr edit 3",
+        "pr close 3",
+        "issue edit 4",
+        "issue close 4",
+        "issue edit 5",
+        "issue close 5",
+    ]
+    marked = [c for c in fake_gh.calls if c[1:3] == ["pr", "edit"]][0][-1]
+    assert marked.startswith("BODY=<!-- fork-sync tag=v1.0.5 kind=superseded -->")
     assert sum("closed superseded" in a for a in rep.actions) == 3
 
 
 def test_a_newer_conflict_replaces_an_older_pull_request(fake_gh):
     _publish(fake_gh, "conflict", [_p(3, "v1.0.5", True)], conflicts=["app.py"])
-    assert _verbs(fake_gh.calls) == ["issue create -R", "pr close 3"]
+    assert _verbs(fake_gh.calls) == ["issue create -R", "pr edit 3", "pr close 3"]
+
+
+def test_a_superseded_proposal_reopened_by_a_person_stays_open(fake_gh):
+    _publish(fake_gh, "pr", [_p(3, "v1.0.5", True, kind="superseded")])
+    assert _verbs(fake_gh.calls) == ["pr create -R"]
 
 
 def test_a_refused_pull_request_becomes_an_issue_with_the_link_to_open_it(fake_gh):

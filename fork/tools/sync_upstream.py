@@ -255,6 +255,7 @@ class Proposal:
     tag: str
     body: str
     marked: bool  # carries the tool's marker (False: a pull request someone opened from the sync branch)
+    kind: str = ""  # from the marker; "superseded" once the tool closed it for a newer tag
 
 
 def classify(prs: list[dict], issues: list[dict]) -> list[Proposal]:
@@ -269,22 +270,24 @@ def classify(prs: list[dict], issues: list[dict]) -> list[Proposal]:
             continue
         out.append(
             Proposal(
-                item["number"], item["url"], is_pr, item.get("state", "OPEN"), tag, body, bool(m)
+                item["number"],
+                item["url"],
+                is_pr,
+                item.get("state", "OPEN"),
+                tag,
+                body,
+                bool(m),
+                m[2] if m else "",
             )
         )
     return out
 
 
 def closed_by_hand(props: list[Proposal], tag: str) -> Proposal | None:
-    """A proposal for this tag that a person closed: the tool never closes its own tag's pull request, and closes
-    its tag's issue only once a pull request for the tag exists."""
-    mine = [p for p in props if p.tag == tag]
-    for p in mine:
-        if p.is_pr and p.state == "CLOSED":
-            return p
-    if not any(p.is_pr for p in mine):
-        return next((p for p in mine if not p.is_pr and p.state == "CLOSED"), None)
-    return None
+    """A proposal for this tag that a person closed. The tool marks what it closes `kind=superseded` first."""
+    return next(
+        (p for p in props if p.tag == tag and p.state == "CLOSED" and p.kind != "superseded"), None
+    )
 
 
 def merge_body(existing: str, block: str) -> str:
@@ -1072,28 +1075,46 @@ def publish(
             target = Proposal(0, url, False, "OPEN", rep.target, block, True)
 
     for item in open_props:
-        if item.url == target.url:
+        if (
+            item.url == target.url or item.kind == "superseded"
+        ):  # superseded and open: a person reopened it
             continue
         older = (version(item.tag) or (0, 0, 0)) < (version(rep.target) or (0, 0, 0))
         own_issue_replaced = item.tag == rep.target and not item.is_pr and target.is_pr
-        if not (older or own_issue_replaced):
-            continue
-        close = run(
+        if older or own_issue_replaced:
+            supersede(rep, gh, out, item, target.url)
+
+
+def supersede(rep: Report, gh: list[str], out: Path, item: Proposal, by_url: str) -> None:
+    """Mark the proposal superseded, then close it; if a person reopens it, the tool leaves it open."""
+    marker = f"<!-- fork-sync tag={item.tag} kind=superseded -->"
+    body = MARKER_RE.sub(marker, item.body, count=1) if item.marked else f"{marker}\n{item.body}"
+    body_file = out / "close-body.md"
+    body_file.write_text(body)
+    verb = "pr" if item.is_pr else "issue"
+    edit = run(
+        ["gh", verb, "edit", str(item.number), *gh, "--body-file", str(body_file)], check=False
+    )
+    close = (
+        run(
             [
                 "gh",
-                "pr" if item.is_pr else "issue",
+                verb,
                 "close",
                 str(item.number),
                 *gh,
                 "--comment",
-                f"Superseded by the {rep.target} sync: {target.url}",
+                f"Superseded by the {rep.target} sync: {by_url}",
             ],
             check=False,
         )
-        if close.returncode == 0:
-            rep.actions.append(f"closed superseded proposal {item.url} (branch kept)")
-        else:
-            rep.warnings.append(f"could not close {item.url}: {close.stderr.strip()}")
+        if edit.returncode == 0
+        else edit
+    )
+    if close.returncode == 0:
+        rep.actions.append(f"closed superseded proposal {item.url} (branch kept)")
+    else:
+        rep.warnings.append(f"could not close {item.url}: {close.stderr.strip()}")
 
 
 def update(
