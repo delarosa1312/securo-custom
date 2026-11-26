@@ -46,3 +46,13 @@ upstream.
 Dashing's coordinator and quality tools carry Dashing assumptions. This repository has four small scripts in
 `fork/tools/` and a written process (`PROCESS.md`); state lives in GitHub issues and the memory folder. No
 registry or orchestration framework until a concrete need shows up twice.
+
+## D-008 F-001: the dashboard keeps computing Available balance in the browser (2026-11-26)
+
+Upstream sums the headline from `GET /api/accounts` in the browser. F-001 keeps that and adds one predicate to the
+existing filter, instead of making the dashboard call the new server route: no new request, loading state or
+layout change in an upstream page. The server figure (`app/fork/available_balance.py`) uses the same inputs and
+the same rule (converted balance, or the native one with `fx_fallback` when no rate exists), and the fork tests
+pin both to the issue's worked example so they cannot drift apart unnoticed. The route lives under
+`/api/accounts` so the existing `accounts` token scope covers it; it is mounted before upstream's accounts
+router because `/{account_id}` would otherwise take the path.

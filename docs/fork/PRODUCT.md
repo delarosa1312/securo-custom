@@ -37,6 +37,18 @@ reports, ease of use, MCP access, upstream compatibility, visual consistency.
 | Exceptional expense | A one-off (a wedding, a renovation, a costly device, a reimbursed purchase). Stays in history, can be left out of the lifestyle baseline. |
 | Discretionary baseline | The estimate of ordinary variable spending used when no budget covers it. |
 
+The "Include in available balance" setting (F-001) is per account, on by default, and exists on checking,
+savings and wallet accounts only. Switched off, the account leaves exactly these figures: the dashboard's
+Available balance and its chips, the card widget's "left after paying" figure, the predictive forecast, and
+`GET /api/accounts/available-balance` (MCP `get_available_balance`). In the predictive forecast everything about
+the account leaves: its starting balance, its scheduled flows (manual and detected recurring) and its spending
+history in the discretionary burn, so the runway counts down from available money only. A transfer from an
+included account into it still counts as money leaving available. It stays in total
+balance, net worth and its cash row, the Cash Flow report, the dashboard projection, account history and every
+other report. Cards, loans and investments are never available money; closed accounts never count. Example:
+current account 500, cash 100, reserve 1,000 switched off, card owing 300: available 600, after paying the card
+200, total balance 1,300.
+
 Three layers a projection may combine, each at most once per unit of spending:
 
 1. Scheduled: pending rows, future-dated rows, installments, recurring occurrences.
