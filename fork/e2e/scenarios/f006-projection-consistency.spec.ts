@@ -2,7 +2,7 @@
 // Every figure is compared view against view (docs/fork/PROJECTIONS.md), never against numbers copied here.
 import { expect, test, type Page, type Response } from '@playwright/test'
 
-import { loginInBrowser, mcpClient, rest, restToken, saveEvidence, screenshot } from '../lib/stack'
+import { loginInBrowser, mcpClient, rest, restToken, saveEvidence, screenshot, stack } from '../lib/stack'
 
 type Point = { date: string; value: number }
 type Report = { trend: Point[] }
@@ -64,18 +64,10 @@ test('F-006 projected balances agree: card, chart, Cash Flow, calendar, predicti
   const accounts = await rest<{ id: string; name: string }[]>(token, 'GET', '/api/accounts')
   const checking = accounts.find((a) => a.name === 'Synthetic Checking')!
 
-  // An open invoice due in two days: every balance view counts it, and the calendar lists it (Q13).
-  const invoiceDue = addDays(today, 2)
-  const invoice = await rest<{ id: string; status: string }>(token, 'POST', '/api/invoices', {
-    origin: 'imported', external_source: 'e2e', external_id: 'f006', external_number: 'NF-F006',
-    issue_date: iso(today), due_date: iso(invoiceDue), currency: 'BRL', total: '350.00',
-  })
-  if (invoice.status === 'draft') await rest(token, 'POST', `/api/invoices/${invoice.id}/issue`)
-  saveEvidence('f006-invoice.rest.json', invoice)
   // A monthly bill due three days ago, never generated (Q12): it counts nowhere until it is a row.
   const overdueDay = addDays(today, -3)
   await rest(token, 'POST', '/api/recurring-transactions', {
-    description: 'Synthetic Overdue bill', amount: '70.00', currency: 'BRL', type: 'debit', frequency: 'monthly',
+    description: 'Synthetic Overdue bill', amount: '70.00', currency: 'USD', type: 'debit', frequency: 'monthly',
     day_of_month: overdueDay.getDate(), start_date: iso(overdueDay), account_id: checking.id, auto_generate: false,
   })
 
@@ -90,13 +82,6 @@ test('F-006 projected balances agree: card, chart, Cash Flow, calendar, predicti
     allEqual(v.thisMonthEnd, `${scope} ${iso(monthEnd(today))}`)
     allEqual(v.nextMonthEnd, `${scope} ${iso(monthEnd(today, 1))}`)
   }
-
-  // The calendar lists the invoice it counts on its due date.
-  const invoiceMonth = await rest<Calendar>(token, 'GET', `/api/transactions/calendar?month=${monthStart(invoiceDue)}`)
-  const invoiceDay = invoiceMonth.days.find((d) => d.date === iso(invoiceDue))!
-  expect(invoiceDay.items.filter((i) => i.source === 'invoice').map((i) => i.description)).toEqual([
-    'Invoice NF-F006 (expected)',
-  ])
 
   // The overdue bill is not listed on its past day, and the calendar month around it agrees with the other views.
   const overdueMonth = await rest<Calendar>(token, 'GET', `/api/transactions/calendar?month=${monthStart(overdueDay)}`)
@@ -113,8 +98,8 @@ test('F-006 projected balances agree: card, chart, Cash Flow, calendar, predicti
     forecast.daily_trajectory.filter((p) => p.events.some((e) => e.includes(name))).map((p) => p.date)
   expect(eventsOn('Synthetic Insurer premium')).toEqual([iso(addDays(today, 7))])
   expect(eventsOn('Synthetic Freelance invoice')).toEqual([iso(addDays(today, 20))])
-  // Yesterday's pending card row is not in the card balance yet: it counts tomorrow.
-  expect(eventsOn('Synthetic Bistro (pending)')).toEqual([iso(addDays(today, 1))])
+  // Yesterday's pending card purchase is card debt already owed: the predictive leaves it out (card rule).
+  expect(eventsOn('Synthetic Bistro (pending)')).toEqual([])
   // The overdue bill counts only from its next date, a month after the missed one.
   const nextOverdue = new Date(overdueDay.getFullYear(), overdueDay.getMonth() + 1, overdueDay.getDate())
   expect(eventsOn('Synthetic Overdue bill')).toEqual([iso(nextOverdue)])
@@ -130,17 +115,14 @@ test('F-006 projected balances agree: card, chart, Cash Flow, calendar, predicti
   expect(cents(viaMcpSnapshot.projected_balance_primary)).toBe(restViews.all.thisMonthEnd.card)
   expect(viaMcpForecast.daily_trajectory).toEqual(forecast.daily_trajectory)
 
-  // 4. The screen asks for the same figures: dashboard card and chart, calendar, Upcoming, Cash Flow.
+  // 4. The screen asks for the same figures: dashboard card and chart, calendar, Cash Flow. (Upcoming is not in the
+  // default layout; its workspace date is covered by upcoming-widget.test.tsx.)
   await loginInBrowser(page)
   const seen = (pathPart: string) => (r: Response) => r.url().includes(pathPart) && r.ok()
-  const upcoming = page.waitForRequest((r) => r.url().includes('/api/dashboard/projected-transactions') && r.url().includes('from='))
   const summaryOnScreen = page.waitForResponse(seen('/api/dashboard/summary'))
   await page.goto('/')
   const screenSummary = (await (await summaryOnScreen).json()) as Summary
   expect(cents(screenSummary.projected_balance_primary)).toBe(restViews.all.thisMonthEnd.card)
-  const upcomingUrl = new URL((await upcoming).url())
-  saveEvidence('f006-upcoming.request.json', Object.fromEntries(upcomingUrl.searchParams))
-  expect(upcomingUrl.searchParams.get('from')).toBe(iso(today))
   await settle(page)
   await screenshot(page, 'f006-1-dashboard')
 
@@ -150,13 +132,6 @@ test('F-006 projected balances agree: card, chart, Cash Flow, calendar, predicti
   const end0 = iso(monthEnd(today))
   expect(cents(screenCalendar.days.find((d) => d.date === end0)?.ending_balance)).toBe(restViews.all.thisMonthEnd.calendar)
   await settle(page)
-  if (monthStart(invoiceDue) === monthStart(today)) {
-    // Open the invoice's day: the day panel lists "Invoice NF-F006 (expected)".
-    const dayNumber = String(invoiceDue.getDate())
-    await page.locator('[role="button"]:not(.text-muted-foreground)')
-      .filter({ has: page.getByText(dayNumber, { exact: true }) }).first().click()
-    await expect(page.getByText('Invoice NF-F006 (expected)').first()).toBeVisible()
-  }
   await screenshot(page, 'f006-2-calendar', true)
 
   const cashFlowOnScreen = page.waitForResponse(seen('/api/reports/cash-flow'))
@@ -168,4 +143,67 @@ test('F-006 projected balances agree: card, chart, Cash Flow, calendar, predicti
   if (shownEnd0) expect(cents(shownEnd0.value)).toBe(restViews.all.thisMonthEnd.cashFlow)
   await settle(page)
   await screenshot(page, 'f006-3-cash-flow')
+})
+
+/** REST in another workspace than the seed's own. */
+async function restIn<T>(token: string, workspaceId: string, method: string, apiPath: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${stack.backend}${apiPath}`, {
+    method,
+    headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', 'X-Workspace-Id': workspaceId },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  })
+  if (!res.ok) throw new Error(`${method} ${apiPath} -> ${res.status} ${await res.text()}`)
+  return (await res.json()) as T
+}
+
+test('F-006 the calendar lists the open invoice it counts (Q13), and the views agree with it', async ({ page }) => {
+  test.setTimeout(120_000)
+  const token = await restToken()
+  const today = new Date()
+  // Invoices are a business workspace module: a synthetic business workspace with one account.
+  const studio = await rest<{ id: string }>(token, 'POST', '/api/workspaces', {
+    name: 'Synthetic Studio', kind: 'business', default_currency: 'USD', self_membership: true,
+  })
+  const call = <T>(method: string, apiPath: string, body?: unknown) => restIn<T>(token, studio.id, method, apiPath, body)
+  await call('POST', '/api/accounts', { name: 'Synthetic Studio Checking', type: 'checking', balance: '1000.00', currency: 'USD' })
+  const invoiceDue = addDays(today, 2)
+  const invoice = await call<{ id: string; status: string }>('POST', '/api/invoices', {
+    origin: 'imported', external_source: 'e2e', external_id: 'f006', external_number: 'NF-F006',
+    issue_date: iso(today), due_date: iso(invoiceDue), currency: 'USD', total: '350.00',
+  })
+  if (invoice.status === 'draft') await call('POST', `/api/invoices/${invoice.id}/issue`)
+  saveEvidence('f006-invoice.rest.json', invoice)
+
+  const end = monthEnd(invoiceDue)
+  const calendar = await call<Calendar>('GET', `/api/transactions/calendar?month=${monthStart(invoiceDue)}`)
+  const listed = calendar.days.find((d) => d.date === iso(invoiceDue))!.items.filter((i) => i.source === 'invoice')
+  saveEvidence('f006-invoice-calendar.rest.json', listed)
+  expect(listed.map((i) => i.description)).toEqual(['Invoice NF-F006 (expected)'])
+
+  // The claim moves every balance view the same way on its due date.
+  const cashFlow = await call<Report>('GET', '/api/reports/cash-flow?months=2&interval=daily')
+  const figures: Record<string, number> = {
+    calendar: cents(calendar.days.find((d) => d.date === iso(end))?.ending_balance),
+    cashFlow: cents(cashFlow.trend.find((p) => p.date === iso(end))?.value),
+  }
+  if (monthStart(end) === monthStart(today)) {
+    const summary = await call<Summary>('GET', `/api/dashboard/summary?month=${monthStart(today)}`)
+    figures.card = cents(summary.projected_balance_primary)
+  }
+  saveEvidence('f006-invoice-views.rest.json', figures)
+  allEqual(figures, `invoice workspace ${iso(end)}`)
+  expect(figures.calendar).toBe(135000)
+
+  // The screen: the calendar day lists "Invoice NF-F006 (expected)".
+  await loginInBrowser(page)
+  await page.evaluate((id) => localStorage.setItem('workspace_id', id), studio.id)
+  await page.goto('/?view=calendar')
+  await settle(page)
+  if (monthStart(invoiceDue) === monthStart(today)) {
+    const dayNumber = String(invoiceDue.getDate())
+    await page.locator('[role="button"]:not(.text-muted-foreground)')
+      .filter({ has: page.getByText(dayNumber, { exact: true }) }).first().click()
+    await expect(page.getByText('Invoice NF-F006 (expected)').filter({ visible: true }).first()).toBeVisible()
+  }
+  await screenshot(page, 'f006-4-invoice', true)
 })
