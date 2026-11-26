@@ -96,3 +96,25 @@ the same rule (converted balance, or the native one with `fx_fallback` when no r
 pin both to the issue's worked example so they cannot drift apart unnoticed. The route lives under
 `/api/accounts` so the existing `accounts` token scope covers it; it is mounted before upstream's accounts
 router because `/{account_id}` would otherwise take the path.
+
+## D-011 F-004: an occurrence ledger and a row lock for every schedule; a transfer occurrence is one pair (2026-11-26, #6)
+
+Upstream's `generate_pending` reads due schedules without a lock and advances each pointer in memory, so the
+hourly job and the Generate button (or two workers) can write the same occurrence twice. The fork adds
+`recurring_occurrences` (migration `f002`): one row per schedule and nominal occurrence date, unique, with a
+state (`generated`; `skipped` and `overridden` are reserved for F-005, #7) and the transaction it produced.
+Generation takes the schedules in id order, locks each row (`SELECT ... FOR UPDATE`, re-reading its pointer) and
+claims the occurrence in a savepoint before writing; a claim that loses the unique key advances the pointer and
+writes nothing. This covers every schedule, not only transfers, and is tested on PostgreSQL with two racing runs,
+with the lock and with the unique key alone.
+
+A transfer schedule is an upstream `recurring_transactions` row with `destination_account_id`, and
+`destination_amount` between currencies (the only rate policy: the user fixes the amount received; without it a
+cross-currency schedule is refused). The source is `account_id`, the type debit, no category. Both legs of an
+occurrence carry `recurring_transaction_id`, so upstream's "already generated" checks and projection suppression
+see each account's leg; the month summary, which expects one row per occurrence, counts transfer schedules apart.
+Projections expand a transfer schedule into two leg proxies in fork code, and views that count income and
+expense drop them. Upstream's on-demand FX sync commits the session, so it runs before the pair's savepoint and
+the legs are stamped from stored rates only: the pair stays one unit. That commit releases the schedule lock
+early; the unique claim still keeps the occurrence single. Bank rows never match a transfer schedule or leg: on a
+bank-connected account the generated pending leg stays beside the bank's own row until the user resolves it.

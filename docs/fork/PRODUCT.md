@@ -46,7 +46,7 @@ history in the discretionary burn, so the runway counts down from available mone
 included account and a switched-off one counts only through a scheduled recurring rule (for example "move 500 to
 the reserve" monthly on the current account, which leaves available on its day); transfers that exist only in
 history are ignored, as upstream ignores internal moves. A regular saving into a switched-off account is
-therefore represented by a recurring rule until native recurring transfers arrive with F-004 (#6). It stays in total
+a recurring transfer (F-004) from the current account to the reserve. It stays in total
 balance, net worth and its cash row, the Cash Flow report, the dashboard projection, account history and every
 other report. Cards, loans and investments are never available money; closed accounts never count. Example:
 current account 500, cash 100, reserve 1,000 switched off, card owing 300: available 600, after paying the card
@@ -59,6 +59,27 @@ subtracted from the projected balance with all accounts; with an account or coll
 as "Unallocated Budget". It excludes "Include estimate" and alone offers 24 months. Example: restaurant budget 250,
 posted 100, pending 40 on the 25th, today the 20th of a 30-day month: 110 more spending, 11.00 a day from the 21st.
 Transition from provision schedules: `docs/fork/guides/provisions-to-budgets.md`.
+
+A recurring transfer (F-004) is a recurring schedule with a destination account: type "Transfer" in the recurring
+form, `destination_account_id` on `POST` and `PATCH /api/recurring-transactions`, MCP
+`propose_create_recurring_transfer` and `propose_update_recurring_transfer` (listing and cancelling are the
+ordinary recurring tools). Each occurrence becomes one transfer pair, written whole or not at all and never
+twice: posted on a manual account, pending on a bank-connected one, where the bank's own row is expected. It is
+never income or expense: projected income and expenses, the Cash Flow report, budgets and spending leave it out,
+while balances, Upcoming, the calendar and per-account views move both accounts. In the predictive forecast only
+a transfer crossing the available boundary counts: into a switched-off account it leaves available money, out of
+one it arrives. Both accounts must be open and in the workspace; a closed or moved account makes the occurrence
+wait. Between currencies the schedule needs the amount received each time (`destination_amount`); no rate is
+applied. Editing, deactivating, end dates and deleting work as for any schedule and never change transfers
+already generated. Example: 200 from Checking (1,000) to Savings (1,000) on the 10th of every month: on the 10th
+Checking 800, Savings 1,200, total balance 2,000, monthly income and expenses unchanged.
+
+Transfers already scheduled one by one are converted only on request, one series at a time.
+`GET /api/recurring-transactions/transfer-conversions` (MCP `list_transfer_conversions`) groups future transfers
+with the same accounts, amounts and description whose dates follow one frequency, and changes nothing;
+`POST /api/recurring-transactions/transfer-conversions/{series_id}/apply` (MCP `propose_convert_transfer_series`)
+creates the recurring transfer, ending at the series' last transfer unless `open_ended` or a later `end_date` is
+given, and links those transfers to it as its occurrences. No balance or forecast moves.
 
 Three layers a projection may combine, each at most once per unit of spending:
 
