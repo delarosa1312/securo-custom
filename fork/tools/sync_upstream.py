@@ -500,7 +500,15 @@ def sync(git: Git, args, out: Path, rep: Report) -> int:
     rep.target = target = target_rel.tag
     if not git.rev(f"refs/tags/{target}"):
         raise Fail(f"tag {target} is not in the upstream remote")
-    advisories = gh_json(["api", f"repos/{UPSTREAM_REPO}/security-advisories?per_page=100"]) or []
+    try:
+        advisories = (
+            gh_json(["api", f"repos/{UPSTREAM_REPO}/security-advisories?per_page=100"]) or []
+        )
+    except Fail as exc:  # the release-note signal still runs; the warning shows on the proposal
+        advisories = []
+        rep.warnings.append(
+            f"upstream security advisories could not be read, check them by hand: {exc}"
+        )
     rep.security = security_hits(base, target, releases, advisories)
 
     # 2. Facts from git, independent of the merge result.
