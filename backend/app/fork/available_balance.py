@@ -28,6 +28,21 @@ def counts_as_available(account: Mapping[str, Any]) -> bool:
     )
 
 
+def left_out_account_ids(accounts: Iterable[Mapping[str, Any]]) -> set[Any]:
+    """Ids of open checking, savings and wallet accounts switched off.
+
+    The predictive forecast leaves out everything about these (decision Q6):
+    their balance, their scheduled flows and their spending history.
+    """
+    return {
+        account["id"]
+        for account in accounts
+        if account.get("type") in AVAILABLE_ACCOUNT_TYPES
+        and not account.get("is_closed", False)
+        and not counts_as_available(account)
+    }
+
+
 def check_available_setting(account_type: str, update_data: Mapping[str, Any]) -> None:
     """Refuse an `include_in_available` write that cannot be stored or means nothing.
 
