@@ -84,6 +84,26 @@ with the same accounts, amounts and description whose dates follow one frequency
 creates the recurring transfer, ending at the series' last transfer unless `open_ended` or a later `end_date` is
 given, and links those transfers to it as its occurrences. No balance or forecast moves.
 
+Recurring lifecycle (F-005). One occurrence can be skipped (it is never recorded and leaves every projection;
+undo puts it back), recorded now as scheduled, or recorded now with its own amount or date (the series keeps its
+values). A change "from a date on" ends the series the day before and continues it with the new values, so
+earlier months keep the old ones; pending and later rows already recorded follow the change, posted history never
+does, and the confirmation lists both before anything is written. "Correct the whole series" changes it in place,
+for a mistake. Ending a series on a last date cancels every occurrence after it; deactivating pauses it. Delete
+moves the whole series to Deleted, where it generates, projects and matches nothing and can be restored as it
+was (occurrences that fell while it was deleted are recorded as skipped); its recorded rows stay. Delete
+permanently, only from Deleted, erases it with its skips and edits and keeps its rows without the link. Overdue
+occurrences (dated today or earlier, never recorded, counted nowhere) are listed with Record, Skip and Link (to a
+row typed by hand). Every action works for transfer schedules, both legs together (Link excepted), and has REST
+routes under `/api/recurring-transactions/{id}/` (`occurrences`, `occurrences/{date}/skip|record|link`,
+`change-from`, `end`, `trash`, `restore`, `purge`; `GET /api/recurring-transactions/overdue`; `?status=` on the
+list) and MCP tools (`list_recurring_occurrences`, `list_overdue_occurrences`, `propose_skip_occurrence`,
+`propose_record_occurrence`, `propose_link_occurrence`, `propose_change_recurring_from`,
+`propose_end_recurring`, `propose_delete_recurring`, `propose_restore_recurring`). Example: rent 1,500 on the
+10th; "from 1 March, 1,550": the series ends on 28 February and a new part starts on 10 March; January and
+February stay 1,500 in every report and March on projects 1,550; a March rent already recorded ahead with its
+own amount keeps it.
+
 Three layers a projection may combine, each at most once per unit of spending:
 
 1. Scheduled: pending rows, future-dated rows, installments, recurring occurrences.

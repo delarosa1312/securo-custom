@@ -201,6 +201,46 @@ async def _transfer_schedule_materialized(b: Base):
     await b.session.commit()
 
 
+async def _ledger(b: Base, rule, when, state, transaction_id=None):
+    from app.fork.models import RecurringOccurrence
+
+    await data.add(b.session, RecurringOccurrence(
+        workspace_id=b.ws.id, recurring_transaction_id=rule.id, occurrence_date=when, state=state,
+        transaction_id=transaction_id,
+    ))
+
+
+async def _recurring_skipped(b: Base):
+    """F-005: December's occurrence skipped."""
+    rule = await b.rule(b.checking, "30", date(2026, 11, 28))
+    await _ledger(b, rule, date(2026, 12, 28), "skipped")
+
+
+async def _recurring_edited(b: Base):
+    """F-005: December's occurrence recorded ahead with its own amount and date."""
+    rule = await b.rule(b.checking, "30", date(2026, 11, 28))
+    row = await b.txn(b.checking, "45", date(2026, 12, 29), status="pending", source="recurring")
+    row.recurring_transaction_id = rule.id
+    await _ledger(b, rule, date(2026, 12, 28), "overridden", row.id)
+
+
+async def _recurring_split(b: Base):
+    """F-005: changed from December on: the first part ends the day before, its successor carries on."""
+    first = await b.rule(b.checking, "30", date(2026, 11, 28), end_date=date(2026, 11, 30))
+    await b.rule(b.checking, "45", date(2026, 12, 28), predecessor_id=first.id)
+
+
+async def _recurring_deleted(b: Base):
+    """F-005: deleted (recoverable): nothing projected."""
+    await b.rule(b.checking, "30", date(2026, 11, 28), is_active=False, active_before_delete=True,
+                 deleted_at=datetime(2026, 11, 19, tzinfo=timezone.utc))
+
+
+async def _transfer_schedule_skipped(b: Base):
+    rule = await b.rule(b.checking, "200", date(2026, 11, 27), destination_account_id=b.savings.id)
+    await _ledger(b, rule, date(2026, 12, 27), "skipped")
+
+
 COMPONENTS = {
     "base": None,
     "pending_future": _pending_future,
@@ -227,6 +267,11 @@ COMPONENTS = {
     "transfer_schedule": _transfer_schedule,
     "transfer_schedule_overdue": _transfer_schedule_overdue,
     "transfer_schedule_materialized": _transfer_schedule_materialized,
+    "recurring_skipped": _recurring_skipped,
+    "recurring_edited": _recurring_edited,
+    "recurring_split": _recurring_split,
+    "recurring_deleted": _recurring_deleted,
+    "transfer_schedule_skipped": _transfer_schedule_skipped,
 }
 
 

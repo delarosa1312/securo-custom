@@ -40,6 +40,9 @@ month-specific row exists: `_build_budget_map`). No category-group budgets, no s
 - `recurring_transactions`: one account, no destination; frequencies weekly to yearly; weekend adjustment;
   `is_active`, `end_date`, `auto_generate`, `next_occurrence`. No skip, no exceptions, no effective-dated change,
   hard delete (generated rows keep living with the link nulled).
+  Fork: F-004 adds the occurrence ledger and transfer schedules (D-011); F-005 adds skip and edit per occurrence
+  (ledger states), change from a date (successor schedules, `predecessor_id`) and recoverable deletion
+  (`deleted_at`) in `app/fork/recurring_lifecycle.py`, `recurring_series.py`, `recurring_series_rows.py` (D-015).
 - Generation (`generate_pending`, hourly Celery beat plus a button) advances `next_occurrence` with no row lock
   and no unique key on (schedule, date): two workers can create the same occurrence twice.
 - Transfers: two rows sharing `transfer_pair_id`; `create_transfer` handles cross-currency with

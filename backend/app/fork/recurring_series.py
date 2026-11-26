@@ -17,7 +17,7 @@ Nothing here runs without an explicit request; every route has a preview that ch
 from __future__ import annotations
 
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from typing import Any, Optional
 
@@ -35,7 +35,14 @@ from app.fork.recurring_lifecycle import (
     lock,
     nominal_dates,
 )
-from app.fork.recurring_transfers import is_transfer_schedule
+from app.fork.recurring_series_rows import (
+    Impact,
+    classify,
+    current_day,
+    delete_units,
+    follow_change,
+    follow_edited,
+)
 from app.models.recurring_transaction import RecurringTransaction
 from app.models.transaction import Transaction
 from app.schemas.recurring_transaction import RecurringTransactionCreate, RecurringTransactionUpdate
@@ -55,33 +62,6 @@ NOT_THE_CURRENT_PART = "This part of the series has ended; change its current pa
 NOT_DELETED = "Only a deleted recurring transaction can be deleted permanently or restored"
 END_BEFORE_START = "The last occurrence cannot be before the series starts; delete it instead"
 DUPLICATE_SPLIT = "The series already changes on that date"
-
-
-@dataclass
-class RowImpact:
-    transaction_id: uuid.UUID
-    date: date
-    amount: Any
-    status: str
-    transfer_pair_id: Optional[uuid.UUID]
-
-
-@dataclass
-class Impact:
-    """What an action does to the rows the series already wrote."""
-
-    history: int = 0
-    follow: list[RowImpact] = field(default_factory=list)
-    removed: list[RowImpact] = field(default_factory=list)
-    edited: list[RowImpact] = field(default_factory=list)
-    skipped_kept: list[date] = field(default_factory=list)
-    skipped_dropped: list[date] = field(default_factory=list)
-
-
-def _today(rec: RecurringTransaction) -> date:
-    from app.core.app_clock import app_today
-
-    return app_today()
 
 
 async def chain(session: AsyncSession, rec: RecurringTransaction) -> list[RecurringTransaction]:
@@ -117,218 +97,6 @@ def current_part(parts: list[RecurringTransaction]) -> RecurringTransaction:
     continued = {part.predecessor_id for part in parts if part.predecessor_id}
     heads = [part for part in parts if part.id not in continued]
     return heads[-1]
-
-
-async def _linked_rows(
-    session: AsyncSession, recurring_ids: list[uuid.UUID], workspace_id: uuid.UUID
-) -> list[Transaction]:
-    return list(
-        (
-            await session.execute(
-                select(Transaction)
-                .where(
-                    Transaction.workspace_id == workspace_id,
-                    Transaction.recurring_transaction_id.in_(recurring_ids),
-                )
-                .order_by(Transaction.date, Transaction.id)
-                .with_for_update()
-            )
-        ).scalars().all()
-    )
-
-
-async def _ledger_by_tx(
-    session: AsyncSession, recurring_ids: list[uuid.UUID]
-) -> dict[uuid.UUID, RecurringOccurrence]:
-    rows = (
-        await session.execute(
-            select(RecurringOccurrence).where(
-                RecurringOccurrence.recurring_transaction_id.in_(recurring_ids),
-                RecurringOccurrence.transaction_id.is_not(None),
-            )
-        )
-    ).scalars().all()
-    return {row.transaction_id: row for row in rows if row.transaction_id}
-
-
-def _units(rows: list[Transaction]) -> list[list[Transaction]]:
-    """Rows grouped as the user sees them: a transfer pair is one unit (debit leg first)."""
-    pairs: dict[uuid.UUID, list[Transaction]] = {}
-    units: list[list[Transaction]] = []
-    for tx in rows:
-        if tx.transfer_pair_id is None:
-            units.append([tx])
-            continue
-        if tx.transfer_pair_id not in pairs:
-            pairs[tx.transfer_pair_id] = []
-            units.append(pairs[tx.transfer_pair_id])
-        pairs[tx.transfer_pair_id].append(tx)
-    for unit in units:
-        unit.sort(key=lambda tx: tx.type != "debit")
-    return units
-
-
-def _row(unit: list[Transaction]) -> RowImpact:
-    head = unit[0]
-    return RowImpact(head.id, head.date, head.amount, head.status, head.transfer_pair_id)
-
-
-def _is_scheduled(tx: Transaction, today: date) -> bool:
-    return tx.status == "pending" or tx.date > today
-
-
-async def classify(
-    session: AsyncSession,
-    parts: list[RecurringTransaction],
-    from_date: date,
-    *,
-    dates_change: bool,
-    removing: bool = False,
-    only_after_today: bool = False,
-) -> tuple[Impact, list[list[Transaction]], list[list[Transaction]], list[list[Transaction]]]:
-    """Sort the series' rows dated on or after ``from_date``: (impact, follow, remove, edited).
-
-    ``removing`` (end, delete): scheduled rows are offered for deletion instead of following.
-    ``only_after_today``: rows dated today or earlier are left alone (delete keeps what is due).
-    """
-    ids = [part.id for part in parts]
-    workspace_id = parts[0].workspace_id
-    today = _today(parts[0])
-    ledger = await _ledger_by_tx(session, ids)
-    impact = Impact()
-    follow: list[list[Transaction]] = []
-    remove: list[list[Transaction]] = []
-    edited: list[list[Transaction]] = []
-    for unit in _units(await _linked_rows(session, ids, workspace_id)):
-        head = unit[0]
-        entry = next((ledger[tx.id] for tx in unit if tx.id in ledger), None)
-        occurrence_day = entry.occurrence_date if entry is not None else head.date
-        if occurrence_day < from_date and head.date < from_date:
-            continue
-        if only_after_today and head.date <= today:
-            continue
-        if not _is_scheduled(head, today):
-            impact.history += 1
-            continue
-        if removing:
-            remove.append(unit)
-            impact.removed.append(_row(unit))
-        elif entry is not None and entry.state == "overridden" and not (dates_change and head.date > today):
-            edited.append(unit)
-            impact.edited.append(_row(unit))
-        elif dates_change and head.date > today:
-            remove.append(unit)
-            impact.removed.append(_row(unit))
-        else:
-            follow.append(unit)
-            impact.follow.append(_row(unit))
-    return impact, follow, remove, edited
-
-
-async def _delete_units(session: AsyncSession, units: list[list[Transaction]]) -> None:
-    from app.services.attachment_service import cleanup_attachment_files
-
-    ids = [tx.id for unit in units for tx in unit]
-    if not ids:
-        return
-    # A pair's other leg may not be linked (older rows): take it with its partner.
-    pair_ids = {tx.transfer_pair_id for unit in units for tx in unit if tx.transfer_pair_id}
-    if pair_ids:
-        partners = (
-            await session.execute(
-                select(Transaction).where(
-                    Transaction.transfer_pair_id.in_(pair_ids), Transaction.id.not_in(ids)
-                )
-            )
-        ).scalars().all()
-        units = [*units, list(partners)]
-        ids += [tx.id for tx in partners]
-    await session.execute(
-        delete(RecurringOccurrence).where(RecurringOccurrence.transaction_id.in_(ids))
-    )
-    await cleanup_attachment_files(session, ids)
-    for unit in units:
-        for tx in unit:
-            await session.delete(tx)
-    await session.flush()
-
-
-async def _follow(
-    session: AsyncSession, units: list[list[Transaction]], target: RecurringTransaction
-) -> None:
-    """Give scheduled rows the target schedule's values and link them to it (both legs)."""
-    from app.services.credit_card_service import apply_effective_date
-    from app.services.fx_rate_service import stamp_primary_amount
-    from app.models.account import Account
-
-    for unit in units:
-        for tx in unit:
-            tx.recurring_transaction_id = target.id
-            tx.description = target.description
-            if is_transfer_schedule(target) and tx.transfer_pair_id is not None:
-                debit = tx.type == "debit"
-                account_id = target.account_id if debit else target.destination_account_id
-                received = target.destination_amount if target.destination_amount is not None else target.amount
-                tx.amount = target.amount if debit else received
-            else:
-                account_id = target.account_id
-                old_amount = tx.amount
-                tx.amount = target.amount
-                tx.type = target.type
-                tx.currency = target.currency
-                await _follow_category(session, tx, target, old_amount)
-            if account_id is not None and tx.account_id != account_id:
-                tx.account_id = account_id
-                account = await session.get(Account, account_id)
-                if account is not None:
-                    tx.currency = account.currency
-                    apply_effective_date(tx, account)
-            await session.flush()
-            # Rates were warmed before anything was written: a fetch here would commit midway.
-            await stamp_primary_amount(
-                session, target.user_id, tx, allow_fetch=False, restamp_account=True
-            )
-    await session.execute(
-        sql_update(RecurringOccurrence)
-        .where(RecurringOccurrence.transaction_id.in_([tx.id for unit in units for tx in unit]))
-        .values(recurring_transaction_id=target.id)
-    )
-
-
-async def _follow_category(
-    session: AsyncSession, tx: Transaction, target: RecurringTransaction, old_amount: Any
-) -> None:
-    """The row takes the schedule's category or split, sized to its amount."""
-    from app.schemas.transaction_category_line import TransactionCategoryLinesInput
-    from app.services import category_line_service
-
-    if target.has_category_lines and len(target.category_lines) >= 2:
-        lines = sorted(target.category_lines, key=lambda line: line.position)
-        if lines[0].share_type == "percent":
-            payload = {"share_type": "percent", "lines": [
-                {"category_id": line.category_id, "share_pct": line.share_pct} for line in lines
-            ]}
-        else:
-            try:
-                amounts = category_line_service._distribute(
-                    category_line_service._quantize(abs(tx.amount)),
-                    category_line_service._weights(lines),
-                )
-            except ValueError:
-                return
-            payload = {"share_type": "exact", "lines": [
-                {"category_id": line.category_id, "amount": amount}
-                for line, amount in zip(lines, amounts)
-            ]}
-        await category_line_service.replace_lines(
-            session, tx, TransactionCategoryLinesInput.model_validate(payload)
-        )
-        return
-    if tx.has_category_lines:
-        await category_line_service.replace_lines(
-            session, tx, TransactionCategoryLinesInput(share_type="exact", lines=[])
-        )
-    tx.category_id = target.category_id
 
 
 def _successor_payload(
@@ -538,15 +306,15 @@ async def change_from(
     if rec.next_occurrence > ended:
         rec.is_active = False
     successor = await _create_successor(session, rec, payload, active=was_active)
-    today = _today(rec)
+    today = current_day(rec)
     floor = max(successor.start_date, old_pointer if not dates_change else min(old_pointer, today + timedelta(days=1)))
     upcoming = nominal_dates(successor, floor, floor + timedelta(days=800), limit=1)
     successor.next_occurrence = upcoming[0] if upcoming else floor
     if successor.end_date and successor.next_occurrence > successor.end_date:
         successor.is_active = False
-    await _delete_units(session, remove)
-    await _follow(session, follow, successor)
-    await _follow_edited(session, edited, successor)
+    await delete_units(session, remove)
+    await follow_change(session, follow, successor)
+    await follow_edited(session, edited, successor)
     if skipped:
         ids = [row.id for row in skipped]
         if dates_change:
@@ -564,23 +332,6 @@ async def change_from(
     await session.refresh(successor, ["category_lines"])
     await session.refresh(successor)
     return ChangeResult(successor, impact, False)
-
-
-async def _follow_edited(
-    session: AsyncSession, units: list[list[Transaction]], target: RecurringTransaction
-) -> None:
-    """An occurrence edited on its own keeps its values and belongs to the new part."""
-    ids = [tx.id for unit in units for tx in unit]
-    if not ids:
-        return
-    for unit in units:
-        for tx in unit:
-            tx.recurring_transaction_id = target.id
-    await session.execute(
-        sql_update(RecurringOccurrence)
-        .where(RecurringOccurrence.transaction_id.in_(ids))
-        .values(recurring_transaction_id=target.id)
-    )
 
 
 async def whole_series_impact(
@@ -616,12 +367,12 @@ async def correct_whole_series(
     )
     if updated is None:
         raise LifecycleNotFound("Recurring transaction not found")
-    await _warm(session, updated, _today(updated))
+    await _warm(session, updated, current_day(updated))
     rec = await lock(session, workspace_id, recurring_id)
     impact, follow, remove, edited = await classify(session, [rec], date.min, dates_change=dates_change)
     impact.history = 0
-    await _delete_units(session, remove)
-    await _follow(session, follow, rec)
+    await delete_units(session, remove)
+    await follow_change(session, follow, rec)
     await session.commit()
     await session.refresh(rec, ["category_lines"])
     await session.refresh(rec)
@@ -654,7 +405,7 @@ async def end_series(
     if rec.next_occurrence > last_date:
         rec.is_active = False
     if delete_scheduled:
-        await _delete_units(session, remove)
+        await delete_units(session, remove)
     # Skips after the end mean nothing any more.
     await session.execute(
         delete(RecurringOccurrence).where(
@@ -694,7 +445,7 @@ async def trash(
         part.is_active = False
         part.deleted_at = now
     if delete_scheduled:
-        await _delete_units(session, remove)
+        await delete_units(session, remove)
     ids = [part.id for part in parts]
     await session.commit()
     return ids, impact
@@ -733,7 +484,7 @@ async def restore(
         raise LifecycleConflict(NOT_DELETED)
     parts = await chain(session, rec)
     head = current_part(parts)
-    today = _today(head)
+    today = current_day(head)
     deleted_on = head.deleted_at.date() if head.deleted_at else today
     missed = [
         nominal
@@ -795,3 +546,21 @@ async def purge(
     await session.commit()
     return ids, kept
 
+
+
+def predecessors_first(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Backup rows of recurring_transactions with each part before its successor.
+
+    A restore inserts them in this order and PostgreSQL checks ``predecessor_id`` row by row;
+    an export has no order, and an update can move a predecessor after its successor.
+    """
+    by_id = {str(row.get("id")): row for row in rows}
+
+    def depth(row: dict[str, Any]) -> int:
+        steps, current = 0, row
+        while steps < len(rows) and str(current.get("predecessor_id")) in by_id:
+            current = by_id[str(current.get("predecessor_id"))]
+            steps += 1
+        return steps
+
+    return sorted(rows, key=depth)
