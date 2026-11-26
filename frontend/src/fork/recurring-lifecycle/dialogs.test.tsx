@@ -5,7 +5,7 @@ import { renderWithProviders, t } from '@/test/utils'
 
 const lifecycle = vi.hoisted(() => ({
   trash: vi.fn(), end: vi.fn(), restore: vi.fn(), purge: vi.fn(), changeFrom: vi.fn(), overdue: vi.fn(),
-  skip: vi.fn(),
+  skip: vi.fn(), list: vi.fn(),
 }))
 const update = vi.hoisted(() => vi.fn())
 vi.mock('./api', () => ({ recurringLifecycle: lifecycle }))
@@ -19,6 +19,7 @@ import { ChangeFromDialog } from './change-from-dialog'
 import type { LifecycleRecurring } from './edit-scope'
 import { OverdueSection, UpcomingOverdueLine } from './overdue-section'
 import { SeriesActionDialog } from './series-dialogs'
+import { useRecurringTabs } from './tabs'
 import type { Impact } from './types'
 
 const rent = {
@@ -72,6 +73,32 @@ describe('Restore and Delete permanently', () => {
     lifecycle.purge.mockResolvedValue({ deleted: [], kept_transactions: 4, preview: true })
     renderWithProviders(<SeriesActionDialog schedule={rent} action="purge" onClose={() => {}} />)
     expect(await screen.findByText(/Its 4 recorded transactions stay in your history/)).toBeInTheDocument()
+    expect(screen.queryByTestId('whole-series')).not.toBeInTheDocument()
+  })
+
+  it('says a split series goes whole', async () => {
+    lifecycle.purge.mockResolvedValue({ deleted: [], kept_transactions: 1, preview: true })
+    const current = { ...rent, id: 'rec-rent-2', predecessor_id: 'rec-rent', deleted_at: '2026-11-26T12:00:00Z' } as LifecycleRecurring
+    renderWithProviders(<SeriesActionDialog schedule={current} action="purge" onClose={() => {}} />)
+    expect(await screen.findByTestId('whole-series')).toHaveTextContent('This covers the whole series, its earlier parts included.')
+  })
+})
+
+describe('status tabs', () => {
+  function Tabs({ live }: { live: LifecycleRecurring[] }) {
+    const { counts, rows } = useRecurringTabs(live)
+    return <p data-testid="tabs">{`${counts.active}/${counts.inactive}/${counts.deleted} ${rows.map((rt) => rt.id).join(',')}`}</p>
+  }
+
+  it('shows a split series once, under its current part, in every tab', async () => {
+    const earlier = { ...rent, end_date: '2026-12-09', is_active: false } as LifecycleRecurring
+    const current = { ...rent, id: 'rec-rent-2', predecessor_id: 'rec-rent', start_date: '2026-12-10' } as LifecycleRecurring
+    const gymOld = { ...rent, id: 'rec-gym', is_active: false, deleted_at: '2026-11-26T12:00:00Z' } as LifecycleRecurring
+    const gymNew = { ...gymOld, id: 'rec-gym-2', predecessor_id: 'rec-gym' } as LifecycleRecurring
+    const paused = { ...rent, id: 'rec-paused', is_active: false } as LifecycleRecurring
+    lifecycle.list.mockResolvedValue([gymOld, gymNew])
+    renderWithProviders(<Tabs live={[earlier, current, paused]} />)
+    await waitFor(() => expect(screen.getByTestId('tabs')).toHaveTextContent('1/1/1 rec-rent-2'))
   })
 })
 

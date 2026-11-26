@@ -164,7 +164,7 @@
     "end": {
       "title": "Encerrar \"{{description}}\"?",
       "lastDate": "Última ocorrência em",
-      "body": "Última ocorrência em {{date}}. Nenhuma ocorrência depois dela é registrada ou prevista. A recorrência vai para Inativas.",
+      "body": "Última ocorrência em {{date}}. Nenhuma ocorrência depois dela é registrada ou prevista. Ela vai para Inativas depois da última ocorrência.",
       "deleteScheduled_one": "Excluir também a {{count}} transação agendada depois dessa data ({{items}})",
       "deleteScheduled_other": "Excluir também as {{count}} transações agendadas depois dessa data ({{items}})",
       "confirm": "Encerrar série",
@@ -196,6 +196,7 @@
       "confirm": "Restaurar",
       "done": "Restaurada"
     },
+    "wholeSeries": "Vale para a série inteira, inclusive as partes anteriores.",
     "proposal": {
       "skip_occurrence": "Pular uma ocorrência",
       "unskip_occurrence": "Desfazer um pulo",

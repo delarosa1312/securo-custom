@@ -103,9 +103,10 @@ list) and MCP tools (`list_recurring_occurrences`, `list_overdue_occurrences`, `
 10th; "from 1 March, 1,550": the series ends on 28 February and a new part starts on 10 March; January and
 February stay 1,500 in every report and March on projects 1,550; a March rent already recorded ahead with its
 own amount keeps it.
-On screen: the Recurring page has Active, Inactive and Deleted tabs (Active first), the amber overdue section
-above them, and a menu on each row (Edit, Occurrences, Price history, Pause or Resume, End series..., Delete; on a
-deleted one Restore and Delete permanently). Saving a changed amount, account, category or rule asks "Apply the
+On screen: the Recurring page has Active, Inactive and Deleted tabs (Active first; a series changed from a date
+shows once, under its current part), the amber overdue section above them, and a menu on each row (Edit,
+Occurrences, Price history, Pause or Resume, End series..., Delete; on a deleted one Restore and Delete
+permanently, for the whole series). Saving a changed amount, account, category or rule asks "Apply the
 change from when?" with what happens to rows already recorded; End and Delete offer to delete the scheduled rows
 after the date, ticked and listed. The dashboard's Upcoming widget shows one line when occurrences are overdue,
 linking to the section. The assistant's lifecycle proposals apply from the chat card like the others.

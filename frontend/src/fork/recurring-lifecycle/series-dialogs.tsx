@@ -137,6 +137,13 @@ function DeleteScheduled({
   )
 }
 
+/** Delete, restore and delete permanently act on every part of a split series, which the list shows once. */
+function WholeSeries({ schedule }: { schedule: LifecycleRecurring }) {
+  const { t } = useTranslation()
+  if (!schedule.predecessor_id) return null
+  return <p data-testid="whole-series">{t('fork.recurringLifecycle.wholeSeries')}</p>
+}
+
 function EndForm({ schedule, onClose }: { schedule: LifecycleRecurring; onClose: () => void }) {
   const { t } = useTranslation()
   const dateLocale = useDateLocale()
@@ -214,6 +221,7 @@ function TrashForm({ schedule, onClose }: { schedule: LifecycleRecurring; onClos
       onClose={onClose}
     >
       <p>{t('fork.recurringLifecycle.trash.body', { count: kept })}</p>
+      <WholeSeries schedule={schedule} />
       <DeleteScheduled
         labelKey="trash"
         rows={removed}
@@ -250,6 +258,7 @@ function PurgeForm({ schedule, onClose }: { schedule: LifecycleRecurring; onClos
       onClose={onClose}
     >
       <p>{t('fork.recurringLifecycle.purge.body', { count: preview.data?.kept_transactions ?? 0 })}</p>
+      <WholeSeries schedule={schedule} />
     </Frame>
   )
 }
@@ -292,6 +301,7 @@ function RestoreForm({ schedule, onClose }: { schedule: LifecycleRecurring; onCl
             : t('fork.recurringLifecycle.restore.inactive')}
         </p>
       )}
+      <WholeSeries schedule={schedule} />
     </Frame>
   )
 }

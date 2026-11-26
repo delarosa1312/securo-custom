@@ -164,7 +164,7 @@
     "end": {
       "title": "End \"{{description}}\"?",
       "lastDate": "Last occurrence on",
-      "body": "Last occurrence on {{date}}. No occurrence after it is recorded or forecast. The schedule moves to Inactive.",
+      "body": "Last occurrence on {{date}}. No occurrence after it is recorded or forecast. It moves to Inactive after its last occurrence.",
       "deleteScheduled_one": "Also delete the {{count}} scheduled transaction after that date ({{items}})",
       "deleteScheduled_other": "Also delete the {{count}} scheduled transactions after that date ({{items}})",
       "confirm": "End series",
@@ -196,6 +196,7 @@
       "confirm": "Restore",
       "done": "Restored"
     },
+    "wholeSeries": "This covers the whole series, its earlier parts included.",
     "proposal": {
       "skip_occurrence": "Skip an occurrence",
       "unskip_occurrence": "Undo a skip",
