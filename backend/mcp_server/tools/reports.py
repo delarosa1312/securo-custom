@@ -9,6 +9,7 @@ from app.services import dashboard_service, report_service
 from mcp_server.auth import CallContext
 from mcp_server.registry import tool
 from mcp_server.tools._helpers import parse_date, resolve_workspace_id
+from mcp_server.tools.fork_budget_forecast import BUDGET_FORECAST_PARAMETER
 
 
 def _pri_currency(ctx: CallContext) -> str:
@@ -85,6 +86,7 @@ async def get_income_expenses(
         "properties": {
             "months": {"type": "integer", "minimum": 1, "maximum": 24, "default": 6},
             "interval": {"type": "string", "enum": ["daily", "weekly", "monthly"], "default": "daily"},
+            "budget_forecast": BUDGET_FORECAST_PARAMETER,
         },
         "additionalProperties": False,
     },
@@ -96,10 +98,12 @@ async def get_cash_flow(
     ctx: CallContext,
     months: int = 6,
     interval: str = "daily",
+    budget_forecast: bool = False,
 ) -> dict[str, Any]:
     ws_id = await resolve_workspace_id(session, ctx)
     rep = await report_service.get_cash_flow_report(
-        session, ws_id, ctx.user_id, months=int(months), interval=interval, currency=_pri_currency(ctx)
+        session, ws_id, ctx.user_id, months=int(months), interval=interval, currency=_pri_currency(ctx),
+        budget_forecast=bool(budget_forecast),
     )
     return _serialize_report(rep)
 
