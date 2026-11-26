@@ -82,8 +82,9 @@ Rollback B: restore the pre-deploy dump and volumes, then deploy the previous im
 | `rehearsal.override.yml`, `rehearse.sh`, `rehearsal_probe.py` | the local rehearsal below |
 
 Compose CLI equivalent: `docker compose -f docker-compose.prod.yml -f fork/deploy/production.override.yml up -d`.
-With plugins with code: add `--profile plugins`; the override already gives both plugin services our image. In
-Coolify, paste the two services from `docker-compose.prod.yml` into the resource with our image line.
+With plugins with code: add `--profile plugins`; the override already gives both plugin services our image.
+Production does not use them; to add them in Coolify later, paste the two services from
+`docker-compose.prod.yml` with our image line.
 
 ### Health checks and limits (staging)
 
@@ -138,59 +139,67 @@ health check healthy.
 
 ## Coolify
 
-### Before the first change (one look, no edits)
+Production today (Matheus, 2026-11-26): a Coolify Service with a pasted compose ("Edit Compose File"), on Coolify's
+own host, with sub-resources `migrate`, `backend`, `frontend`, `celery-worker`, `celery-beat`, `mcp-server`, `db`,
+`redis`; no plugin services; status "Running (no healthcheck)". Never create a new resource for production: a new
+resource starts on new, empty volumes. Production is always that Service, edited in place.
 
-1. Which kind of resource runs Securo: Git-based Docker Compose (Configuration shows a repository and a Docker
-   Compose Location) or pasted (Docker Compose Empty, an editable compose box)?
-2. Is its compose upstream's `docker-compose.prod.yml` unchanged, or edited (image tags pinned, profiles removed,
-   ports, labels)? Keep a private copy of it on your machine either way: it is the stock rollback.
-3. Note the resource UUID (in the Coolify URL of the resource): the SSH commands below use it as `U`.
-4. Environment Variables: is `STORAGE_PROVIDER` `local` (attachments in a volume, back it up) or `s3` (attachments
-   in the bucket, nothing to copy)? Are plugins with code used (`PLUGINS_RUNNER_URL` set)?
+### Before the first change (a look, no edits)
 
-Never create a new resource for production: a new resource starts on new, empty volumes. Production is always
-the existing resource, edited in place.
+1. Open the Service > Edit Compose File, copy the whole compose into a private file on your machine (it is the
+   stock rollback; it holds variable names, not their values, but keep it out of repositories and chats anyway).
+2. Compare it with upstream's, in this repository: `diff -u <(git show v0.22.0:docker-compose.prod.yml)
+   ~/securo-compose-before.yml`. Edits of your own (pinned tags, a removed `profiles:` line, ports, labels) stay
+   as they are. The lines to change are the ones this prints:
+   `grep -nE 'image: ghcr.io/securo-finance/|upgrade head' ~/securo-compose-before.yml`.
+3. MCP runs today: if `mcp-server` in that file still has `profiles: [agents]`, this Coolify starts profiled
+   services anyway; either way leave that line as it is.
+4. The CPU, only if single-architecture builds ever matter: over SSH `uname -m` (`x86_64` is amd64, `aarch64`
+   arm64). Releases build both.
+5. The Service's UUID (in its Coolify URL) is `U` in the SSH commands below.
 
-### Staging (a new resource, synthetic data only)
+### Staging (a new Service, synthetic data only)
 
-1. Project > + New > Docker Compose Empty, paste `fork/deploy/coolify/staging.yml`; or Public Repository
-   `https://github.com/delarosa1312/securo-custom`, branch `main`, Build Pack Docker Compose, Docker Compose
-   Location `/fork/deploy/coolify/staging.yml`.
-2. Environment Variables, all new values, nothing copied from production: `SECURO_CUSTOM_TAG=<version>`,
-   `POSTGRES_PASSWORD` (`openssl rand -hex 24`), `SECRET_KEY` (`openssl rand -hex 32`), `AGENTS_ENABLED=true`,
+1. Project > + New > Docker Compose Empty, paste `fork/deploy/coolify/staging.yml`, Save.
+2. Environment Variables (Coolify lists `SECURO_CUSTOM_TAG` as required and will not deploy without it), all new
+   values, nothing copied from production: `SECURO_CUSTOM_TAG=<version>`, `POSTGRES_PASSWORD`
+   (`openssl rand -hex 24`), `SECRET_KEY` (`openssl rand -hex 32`), `AGENTS_ENABLED=true`,
    `FRONTEND_URL=https://<staging domain>`, `REGISTRATION_ENABLED=true` (only until the seed below), and if the
    Traefik labels are used: `TRAEFIK_RESOURCE_NAME=securo-staging` (must differ from production's).
-3. Domain: the `frontend` service, `https://<staging domain>`, port 8080. Deploy.
+3. Domain: the `frontend` sub-resource, `https://<staging domain>`, port 8080. Deploy.
 4. Seed synthetic data from your machine: `python3 fork/stack/seed.py --base-url https://<staging domain>`
    (login `e2e@example.com`, staging only). Then set `REGISTRATION_ENABLED=false` and restart.
-5. Verify as in "Verify" below, plus every service healthy in the resource's status.
+5. Verify as below, plus every sub-resource healthy (staging has health checks on all but `celery-beat`).
 
-### Production deploy (existing resource, edited in place)
+Alternative for staging: a Git-based Docker Compose application, public repository
+`https://github.com/delarosa1312/securo-custom`, branch `main`, Docker Compose Location
+`/fork/deploy/coolify/staging.yml`; it re-reads the file on each deploy.
+
+### Production deploy (the existing Service, edited in place)
 
 1. Backup (next section). Do not continue without a dump that passed its check.
 2. Note three numbers on the dashboard (available balance, net worth, this month's spending) and open one
    attachment, to compare afterwards.
-3. Environment Variables: add `SECURO_CUSTOM_TAG=v0.22.0-custom.1`. Change nothing else: not `SECRET_KEY`,
+3. Edit Compose File, change only the lines step 2 of "Before the first change" printed, keeping every service and
+   volume name:
+   - every `image: ghcr.io/securo-finance/securo-backend:<tag>` (the `x-backend-base` anchor, which `migrate`,
+     `backend`, `celery-worker`, `celery-beat` and `mcp-server` share, plus any service that names the image
+     itself) becomes `image: ghcr.io/delarosa1312/securo-backend:${SECURO_CUSTOM_TAG:?}`;
+   - `image: ghcr.io/securo-finance/securo-frontend:<tag>` becomes
+     `image: ghcr.io/delarosa1312/securo-frontend:${SECURO_CUSTOM_TAG:?}`;
+   - in `migrate`, `command: upgrade head` becomes `command: upgrade heads` (needed from the first upstream sync on).
+   Save. If your file was identical to upstream's in step 2, pasting `fork/deploy/coolify/production.yml` instead
+   is equivalent.
+4. Environment Variables: set `SECURO_CUSTOM_TAG=v0.22.0-custom.1`. Change nothing else: not `SECRET_KEY`,
    `AGENTS_MCP_JWT_SECRET`, `POSTGRES_PASSWORD`, the domain, the OIDC, storage or MCP settings.
-4. The compose, keeping every service and volume name:
-   - Git-based resource: repository `https://github.com/delarosa1312/securo-custom`, branch `main`, Docker Compose
-     Location `/fork/deploy/coolify/production.yml`. Only if step 2 of "Before the first change" found the
-     compose unchanged from upstream; otherwise use the pasted path below.
-   - Pasted resource: in the compose box, change only these lines. Every
-     `image: ghcr.io/securo-finance/securo-backend:<x>` becomes
-     `image: ghcr.io/delarosa1312/securo-backend:${SECURO_CUSTOM_TAG:?}` (the anchor `x-backend-base`, and
-     `plugins-runner`, `plugins-egress` if present); `image: ghcr.io/securo-finance/securo-frontend:<x>` becomes
-     `image: ghcr.io/delarosa1312/securo-frontend:${SECURO_CUSTOM_TAG:?}`; the `migrate` service's
-     `command: upgrade head` becomes `command: upgrade heads` (needed from the first upstream sync on).
-     If the resource is unchanged from upstream, pasting `fork/deploy/coolify/production.yml` is equivalent.
-5. Deploy (Redeploy). In Logs, `migrate` shows `Running upgrade 131 -> f000` and `f000 -> f001` and exits 0;
-   then every other service starts.
+5. Deploy (Redeploy). Each sub-resource row shows `ghcr.io/delarosa1312/...:v0.22.0-custom.1`. In Logs, `migrate`
+   shows `Running upgrade 131 -> f000` and `f000 -> f001` and exits 0; then every other service starts.
 6. Verify (below). If anything is wrong: Rollback A.
 
 ### Verify
 
-- Every service running (`migrate` exited 0); `backend` healthy.
-- Terminal > `backend` container > `alembic current` prints `f001 (head)` (or the fork head in the release record).
+- Every sub-resource running (`migrate` exited 0); `backend` healthy.
+- Terminal > `backend` > `alembic current` prints `f001 (head)` (or the fork head in the release record).
 - The sidebar shows the release version. You are still logged in (existing sessions survive).
 - The three dashboard numbers are unchanged; the attachment opens.
 - An external MCP client (Claude Desktop, n8n) still connects with its existing token.
@@ -222,8 +231,13 @@ ls -l "$F"*
 If the first `docker ps` lists nothing, this Coolify does not use the UUID as the Compose project name: find the
 containers with `docker ps --format '{{.Names}}' | grep "$U"` and the volumes with `docker volume ls | grep "$U"`,
 and use those names instead of the filters. Then copy the files to your machine (`scp`). `pgdata` itself is not copied: the dump is the database backup.
-`agent_embedding_models` is a download cache and needs no backup. With `STORAGE_PROVIDER=s3`, skip
-`attachments` (they are in the bucket).
+`agent_embedding_models` is a download cache and needs no backup.
+
+Where attachments live: the `backend` sub-resource's Persistent Storage tab lists an `attachments` volume when
+they are stored locally; copy it as above. To see the storage setting without printing any other value:
+`docker exec $(docker ps -q --filter "label=com.docker.compose.project=$U" --filter
+"label=com.docker.compose.service=backend") sh -c 'echo "${STORAGE_PROVIDER:-local}"'` prints `local` (the volume
+holds them) or `s3` (they are in the bucket: skip `attachments`, the bucket is untouched by a deploy).
 
 Second and third lines, not the rollback path: Coolify's scheduled backups of the `db` component (PostgreSQL in a
 compose resource is supported; it reads `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`), and Securo's managed
@@ -250,8 +264,8 @@ switches); everything else entered since the deploy stays.
    SSH: `docker exec $(docker ps -q --filter "label=com.docker.compose.project=$U" --filter
    "label=com.docker.compose.service=backend") alembic downgrade fork@<previous fork head>`.
 2. Right away (the running new images now see a schema without their columns): previous custom release: set
-   `SECURO_CUSTOM_TAG` to it and Redeploy; back to stock: restore your private copy of the stock compose (Git:
-   the previous repository and path), remove `SECURO_CUSTOM_TAG`, Redeploy.
+   `SECURO_CUSTOM_TAG` to it and Redeploy; back to stock: Edit Compose File, paste your private copy of the stock compose, Save,
+   remove `SECURO_CUSTOM_TAG`, Redeploy.
 3. Verify; `migrate` exits 0 with nothing to do.
 
 ### B: restore the pre-deploy dump (anything entered after the dump is lost)
