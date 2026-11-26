@@ -45,6 +45,7 @@ import { useCollectionFilter } from '@/contexts/collection-filter-context'
 import type { ReportResponse, CategoryTrendItem } from '@/types'
 import { formatCompactCurrency, formatCurrency, ltrAmount } from '@/lib/format'
 import { cashFlowBar, cashFlowTopSeries } from '@/lib/cash-flow-bars'
+import { BUDGET_COLOR, BUDGET_RANGE_KEY, BUDGET_RANGE_OPTION, BudgetForecastPanel, BudgetForecastToggle, budgetCashFlowBar, cashFlowTooltip, cashFlowWithBudgets, type CashFlowBudgetResponse } from '@/fork/cash-flow-budget'
 import { localDateString, todayInTimezone } from '@/lib/date-utils'
 import { monthLabel } from '@/lib/month-utils'
 import { clampPeriodWindow, explicitWindow, periodWindow, windowMonths, type PeriodPreset } from '@/lib/report-period'
@@ -142,6 +143,7 @@ const RANGE_LABELS: Record<string, string> = {
   ytd: 'rangeYtd',
   '12m': 'range12m',
   '2y': 'range2y',
+  [BUDGET_RANGE_KEY]: 'range24m',
   this_month: 'rangeThisMonth',
   last_month: 'rangeLastMonth',
   custom: 'customRange',
@@ -299,6 +301,8 @@ export default function ReportsPage() {
   const [sparklineView, setSparklineView] = useState<'byExpenses' | 'byIncome'>('byExpenses')
   const [sparklinePage, setSparklinePage] = useState(0)
   const [cashFlowBaseline, setCashFlowBaseline] = useState(false)
+  // Fork F-002: remaining budgets as spending; excludes the estimate and alone offers 24 months.
+  const [cashFlowBudgets, setCashFlowBudgets] = useState(false)
   const [selectedDate, setSelectedDate] = useState<string | null>(null)
   const [statementMonth, setStatementMonth] = useState(currentMonth)
   const [statementSettings, setStatementSettings] = useState(loadStatementSettings)
@@ -325,7 +329,11 @@ export default function ReportsPage() {
   // composition, aggregated over the selected historical range.
   const isMoneyMap = activeTab === 'money_map'
   const isStatement = activeTab === 'statement'
-  const rangeOptions = currentTab.rangeOptions
+  const rangeOptions: readonly RangeOption[] = isCashFlow && cashFlowBudgets ? [...currentTab.rangeOptions, BUDGET_RANGE_OPTION] : currentTab.rangeOptions
+  const turnOffCashFlowBudgets = () => {
+    if (rangeKey === BUDGET_RANGE_KEY) setRangeKey('12m')
+    setCashFlowBudgets(false)
+  }
   // Cash flow's forecast presets don't make sense with a past-only calendar
   // range, so custom is only offered for the historical tabs (Net Worth,
   // Income vs Expenses, Money Map).
@@ -477,10 +485,10 @@ export default function ReportsPage() {
   }
 
   const { data, isLoading: reportLoading, isError, error, refetch } = useQuery<ReportResponse>({
-    queryKey: ['reports', activeTab, rangeKey, months, period ?? null, days ?? null, interval, isCashFlow ? cashFlowBaseline : false, activeAccountIds, activeWalletIds, apiStart ?? null, apiEnd ?? null],
+    queryKey: ['reports', activeTab, rangeKey, months, period ?? null, days ?? null, interval, isCashFlow ? cashFlowBaseline : false, isCashFlow ? cashFlowBudgets : false, activeAccountIds, activeWalletIds, apiStart ?? null, apiEnd ?? null],
     queryFn: () =>
       isCashFlow
-        ? reports.cashFlow(months, interval, cashFlowBaseline, acctIds)
+        ? cashFlowBudgets ? cashFlowWithBudgets(months, interval, acctIds) : reports.cashFlow(months, interval, cashFlowBaseline, acctIds)
         : activeTab === 'income_expenses' || isMoneyMap
           ? reports.incomeExpenses(months, interval, acctIds, period, days, apiStart, apiEnd, !isCustomRange)
           : reports.netWorth(months, interval, acctIds, walletIds, period, apiStart, apiEnd),
@@ -519,8 +527,11 @@ export default function ReportsPage() {
   })
   // Cash-flow columns are drawn as ranges ending at net flow; see cashFlowBar.
   type BarChartDatum = Record<string, string | number | null | [number, number]> & { date: string }
+  const budgetForecast = meta?.type === 'cash_flow' ? (data as CashFlowBudgetResponse | undefined)?.budget_forecast : undefined
   const barChartData: BarChartDatum[] = chartData.map((point): BarChartDatum =>
-    meta?.type === 'cash_flow' ? { ...point, ...cashFlowBar(point.inflow, point.outflow) } : point,
+    meta?.type === 'cash_flow'
+      ? { ...point, ...(budgetForecast ? budgetCashFlowBar(point.inflow, point.outflow, point.budget_outflow) : cashFlowBar(point.inflow, point.outflow)) }
+      : point,
   )
   const netWorthDomain = getNetWorthDomain(
     chartData
@@ -797,7 +808,7 @@ export default function ReportsPage() {
               >
                 <button
                   type="button"
-                  onClick={() => setCashFlowBaseline((v) => !v)}
+                  onClick={() => { setCashFlowBaseline((v) => !v); turnOffCashFlowBudgets() }}
                   className="flex items-center gap-2 hover:text-foreground transition-colors"
                   aria-pressed={cashFlowBaseline}
                 >
@@ -822,6 +833,12 @@ export default function ReportsPage() {
                   <HelpCircle className="h-3.5 w-3.5 opacity-60" />
                 </span>
               </div>
+            )}
+            {isCashFlow && (
+              <BudgetForecastToggle
+                active={cashFlowBudgets}
+                onToggle={() => { if (cashFlowBudgets) turnOffCashFlowBudgets(); else { setCashFlowBudgets(true); setCashFlowBaseline(false) } }}
+              />
             )}
             {/* On a phone the presets, the custom range and the year picker do
                 not fit in one row, and a row that cannot shrink pushes the whole
@@ -1445,6 +1462,10 @@ export default function ReportsPage() {
         </div>
       </div>
 
+      {budgetForecast && (
+        <BudgetForecastPanel explanation={budgetForecast} currency={userCurrency} locale={locale} dateLocale={dateLocale} />
+      )}
+
       {/* Breakdown: Donut + Grouped Bar */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 items-start">
         {/* Composition widget — summary ring + ranked, labelled detail bars */}
@@ -1892,20 +1913,16 @@ export default function ReportsPage() {
                       // cash flow at all, gets no tooltip.
                       if (items.length === 0) return null
                       const hovered = items[0].payload as BarChartDatum
-                      const cashFlowPoint = meta.type === 'cash_flow'
-                        ? cashFlowBar(hovered.inflowAmount, hovered.outflowAmount)
-                        : null
+                      const cashFlowTip = meta.type === 'cash_flow' ? cashFlowTooltip(hovered, !!budgetForecast) : null
+                      const cashFlowPoint = cashFlowTip ? cashFlowTip.bar : null
                       const netFlowColor = !cashFlowPoint || cashFlowPoint.netFlow === 0
                         ? 'var(--muted-foreground)'
                         : cashFlowPoint.netFlow > 0 ? 'var(--chart-income)' : 'var(--chart-expense)'
                       // Cash-flow bars carry ranges, and a zero-height segment
                       // drops out of `items`; list both amounts from the period
                       // itself so the net flow always has both of its terms.
-                      const rows = cashFlowPoint
-                        ? [
-                            { key: 'inflow', name: 'inflow', color: 'var(--chart-income)', value: cashFlowPoint.inflowAmount },
-                            { key: 'outflow', name: 'outflow', color: 'var(--chart-expense)', value: -cashFlowPoint.outflowAmount },
-                          ]
+                      const rows = cashFlowTip
+                        ? cashFlowTip.rows
                         : items.map((p) => ({
                             key: p.dataKey as string,
                             name: p.name,
@@ -1947,6 +1964,7 @@ export default function ReportsPage() {
                       ? [
                           { key: 'inflow', color: 'var(--chart-income)' },
                           { key: 'outflow', color: 'var(--chart-expense)' },
+                          ...(budgetForecast ? [{ key: 'budget_outflow', color: BUDGET_COLOR }] : []),
                         ]
                       : meta.series_keys.map((k) => ({ key: k, color: colorMap[k] || 'var(--chart-1)' }))
                     const filteredSeries = allSeries.filter(({ key }) =>
@@ -1981,7 +1999,7 @@ export default function ReportsPage() {
                             ? (props: BarShapeProps) => (
                                 <Rectangle
                                   {...props}
-                                  radius={cashFlowTopSeries(props.payload) === key ? [4, 4, 0, 0] : 0}
+                                  radius={(props.payload.topSeries ?? cashFlowTopSeries(props.payload)) === key ? [4, 4, 0, 0] : 0}
                                 />
                               )
                             : undefined}
