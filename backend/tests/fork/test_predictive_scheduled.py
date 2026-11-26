@@ -66,6 +66,52 @@ async def test_overdue_rows_count_tomorrow_and_only_on_covered_accounts(session,
     await b.txn(broker, "500", date(2026, 11, 25), "credit", status="pending")
     forecast = await _forecast(session, test_workspace)
 
+    # The checking row counts tomorrow; the card row is debt already owed, like a posted one of that day.
     assert _ending(forecast, date(2026, 11, 20)) == Decimal("1500.00")
-    assert _ending(forecast, date(2026, 11, 21)) == Decimal("1420.00")
-    assert _ending(forecast, date(2026, 12, 31)) == Decimal("1420.00")
+    assert _ending(forecast, date(2026, 11, 21)) == Decimal("1450.00")
+    assert _ending(forecast, date(2026, 12, 31)) == Decimal("1450.00")
+
+
+async def _card(b):
+    return await data.account(
+        b.session, b.user, b.ws, "Card", acct_type="credit_card", statement_close_day=1, payment_due_day=10,
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_card_purchase_of_today_or_earlier_counts_the_same_pending_or_posted(
+    session, test_user, test_workspace, today,
+):
+    b = await pdata.Base(session, test_user, test_workspace).build()
+    row = await b.txn(await _card(b), "30", date(2026, 11, 19), status="pending")
+    pending = _ending(await _forecast(session, test_workspace), date(2026, 11, 30))
+    row.status = "posted"
+    await session.commit()
+    posted = _ending(await _forecast(session, test_workspace), date(2026, 11, 30))
+    assert pending == posted == Decimal("1500.00")
+
+
+@pytest.mark.asyncio
+async def test_card_spending_counts_but_card_credits_do_not(session, test_user, test_workspace, today):
+    b = await pdata.Base(session, test_user, test_workspace).build()
+    card = await _card(b)
+    await b.txn(card, "200", date(2026, 11, 10))
+    await b.txn(card, "200", date(2026, 11, 25), "credit", status="pending")  # refund of the 11-10 purchase
+    await b.txn(card, "45", date(2026, 11, 27), status="pending")  # spending after today
+    # Paying the bill moves no cash the forecast has not counted: card spending counts when it happens.
+    await b.transfer(b.checking, card, "800", date(2026, 12, 10), status="pending")
+    forecast = await _forecast(session, test_workspace)
+
+    assert _ending(forecast, date(2026, 11, 30)) == Decimal("1455.00")
+    assert _ending(forecast, date(2026, 12, 31)) == Decimal("1455.00")
+
+
+@pytest.mark.asyncio
+async def test_detected_patterns_come_only_from_covered_accounts(session, test_user, test_workspace, today):
+    b = await pdata.Base(session, test_user, test_workspace).build()
+    broker = await data.account(session, test_user, test_workspace, "Broker", acct_type="investment")
+    for month in (7, 8, 9, 10, 11):
+        await _named(b, broker, "40", date(2026, month, 10), "Dividend Synthetic", txn_type="credit")
+    forecast = await _forecast(session, test_workspace)
+
+    assert _ending(forecast, date(2026, 12, 31)) == forecast.summary.starting_liquid_balance

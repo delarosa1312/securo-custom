@@ -30,4 +30,4 @@ async def test_views_reconcile_on_postgres(session, test_user, test_workspace, m
 async def test_views_reconcile_in_accrual_mode_on_postgres(session, test_user, test_workspace, monkeypatch,
                                                            component):
     await admin_service.set_app_setting(session, "credit_card_accounting_mode", "accrual")
-    await _reconcile(session, test_user, test_workspace, monkeypatch, component, "all")
+    await _reconcile(session, test_user, test_workspace, monkeypatch, component, "all", mode="accrual")

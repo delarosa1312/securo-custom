@@ -455,3 +455,32 @@ async def test_composition_splits_the_budget_figure_by_category(session, test_us
 
     filtered = await _report(session, test_workspace, test_user, account_ids=[acct.id], budget_forecast=True)
     assert {c.group for c in filtered.composition if c.key.startswith("budget:")} == {"unallocatedBudget"}
+
+
+@pytest.mark.asyncio
+async def test_a_refund_larger_than_posted_spending_moves_nothing_when_it_posts(
+    session, test_user, test_workspace, today,
+):
+    """Q9: budget 250, posted 100, pending refund 150, monthly rule 80: spending 30 before and after posting."""
+    checking = await data.account(session, test_user, test_workspace)
+    cat = await data.category(session, test_user, test_workspace, "Restaurants")
+    await data.budget(session, test_user, test_workspace, cat, "250")
+    await data.txn(session, test_user, test_workspace, checking, "100", date(2026, 11, 2), cat=cat)
+    refund = await data.txn(session, test_user, test_workspace, checking, "150", date(2026, 11, 25), "credit",
+                            cat=cat, status="pending")
+    await data.recurring(session, test_user, test_workspace, checking, "80", date(2026, 11, 28), cat=cat)
+
+    async def read():
+        rows = await budget_service.get_budget_vs_actual(session, test_workspace.id, test_user.id, date(2026, 11, 1))
+        row = next(r for r in rows if r.category_id == cat.id)
+        report = await get_cash_flow_report(
+            session, test_workspace.id, test_user.id, months=1, interval="daily", budget_forecast=True,
+        )
+        return row.projected_amount, _breakdown(report, "endingBalance")
+
+    before = await read()
+    refund.status, refund.date, refund.effective_date = "posted", today, today
+    await session.commit()
+    after = await read()
+    assert before == after
+    assert before[0] == Decimal("30")

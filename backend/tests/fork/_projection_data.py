@@ -130,6 +130,7 @@ async def _card_purchase_and_installment(b: Base):
         b.session, b.user, b.ws, "Card", acct_type="credit_card", statement_close_day=1, payment_due_day=10,
     )
     await b.txn(card, "120", date(2026, 11, 18), effective_date=date(2026, 12, 10))
+    await b.txn(card, "70", date(2026, 11, 25), status="pending", effective_date=date(2026, 12, 10))
     await b.txn(card, "120", date(2026, 12, 18), effective_date=date(2027, 1, 10))
 
 
@@ -172,6 +173,18 @@ async def _month_edges(b: Base):
     await b.txn(b.checking, "7", date(2026, 12, 1), status="pending")
 
 
+async def _bill_date_and_override(b: Base):
+    """Rows whose reporting date is after their own date: they still move the balance on their own date."""
+    card = await data.account(
+        b.session, b.user, b.ws, "Card", acct_type="credit_card", statement_close_day=1, payment_due_day=10,
+    )
+    billed = await b.txn(card, "70", date(2026, 11, 25), status="pending")
+    billed.effective_bill_date = date(2026, 12, 10)
+    reported = await b.txn(b.checking, "100", date(2026, 11, 26), status="pending")
+    reported.reporting_date_override = date(2027, 1, 5)
+    await b.session.commit()
+
+
 COMPONENTS = {
     "base": None,
     "pending_future": _pending_future,
@@ -194,6 +207,7 @@ COMPONENTS = {
     "connected_pending": _connected_pending,
     "pending_overdue_and_today": _pending_overdue_and_today,
     "month_edges": _month_edges,
+    "bill_date_and_override": _bill_date_and_override,
 }
 
 

@@ -1,7 +1,7 @@
 """F-006: every projection view gives the same balance for the same day (issue #8). Synthetic data only.
 
 One base (checking 1,000.00, savings 500.00) plus one component at a time;
-each view is read at the same dates with all accounts and with checking only.
+each view is read at the same seven dates with all accounts and with checking only.
 A component lists the balance moves it should cause; a view may leave one out
 only where `docs/fork/PROJECTIONS.md` says so (``LEFT_OUT``).
 """
@@ -38,7 +38,9 @@ MOVES: dict[str, list[tuple[date, str, str]]] = {
     "closed_account_rule": [],
     "investment_account_rule": [(D(2026, 11, 26), "40", "broker"), (D(2026, 12, 26), "40", "broker")],
     "excluded_from_pnl_past": [(D(2026, 11, 5), "-60", "checking")],
-    "card_purchase_and_installment": [(D(2026, 11, 18), "-120", "card"), (D(2026, 12, 18), "-120", "card")],
+    "card_purchase_and_installment": [
+        (D(2026, 11, 18), "-120", "card"), (D(2026, 11, 25), "-70", "card"), (D(2026, 12, 18), "-120", "card"),
+    ],
     "invoice_claim": [(D(2026, 11, 27), "400", "claim")],
     "foreign_pending": [(D(2026, 9, 1), "500", "usd"), (D(2026, 11, 25), "-50", "usd")],
     # Not in the balance yet: counted from tomorrow, the first projected day.
@@ -49,6 +51,8 @@ MOVES: dict[str, list[tuple[date, str, str]]] = {
         (D(2026, 11, 30), "-20", "checking"), (D(2026, 11, 30), "-5", "checking"),
         (D(2026, 12, 1), "-10", "checking"), (D(2026, 12, 1), "-7", "checking"), (D(2026, 12, 30), "-20", "checking"),
     ],
+    # Billed or reported after their own date (a manual bill date, a reporting override): balances move on the date.
+    "bill_date_and_override": [(D(2026, 11, 25), "-70", "card"), (D(2026, 11, 26), "-100", "checking")],
 }
 
 # Moves a view leaves out by design (docs/fork/PROJECTIONS.md), keyed by (component, view).
@@ -81,9 +85,11 @@ def expected(component: str, scope: str, view: str, on: date) -> Decimal:
     return total
 
 
-# In accrual mode the Cash Flow is a bill-date cash view: a card purchase leaves on its bill's due date
-# (docs/fork/PROJECTIONS.md). Every other component must not care about the mode.
-ACCRUAL_CASES = [c for c in MOVES if c != "card_purchase_and_installment"]
+# The Cash Flow is a bill-date cash view: a row with a bill date (every card row in accrual mode, a manual bill
+# date in either mode) leaves on that date (docs/fork/PROJECTIONS.md). Only that view is skipped for those rows.
+CASH_FLOW_BILL_DATE = {("bill_date_and_override", "cash"), ("bill_date_and_override", "accrual"),
+                       ("card_purchase_and_installment", "accrual")}
+ACCRUAL_CASES = list(MOVES)
 
 
 @pytest.mark.parametrize("component", list(MOVES))
@@ -97,10 +103,10 @@ async def test_views_reconcile(session, test_user, test_workspace, monkeypatch, 
 @pytest.mark.asyncio
 async def test_views_reconcile_in_accrual_mode(session, test_user, test_workspace, monkeypatch, component):
     await admin_service.set_app_setting(session, "credit_card_accounting_mode", "accrual")
-    await _reconcile(session, test_user, test_workspace, monkeypatch, component, "all")
+    await _reconcile(session, test_user, test_workspace, monkeypatch, component, "all", mode="accrual")
 
 
-async def _reconcile(session, test_user, test_workspace, monkeypatch, component, scope):
+async def _reconcile(session, test_user, test_workspace, monkeypatch, component, scope, mode="cash"):
     data.pin_today(monkeypatch)
     base = await pdata.build(session, test_user, test_workspace, component)
     account_ids = None if scope == "all" else [base.checking.id]
@@ -110,7 +116,7 @@ async def _reconcile(session, test_user, test_workspace, monkeypatch, component,
             continue
         got = await views.read_all(session, test_workspace, test_user, on, account_ids)
         for view, value in got.items():
-            if value is None:
+            if value is None or (view == "cash_flow" and (component, mode) in CASH_FLOW_BILL_DATE):
                 continue
             want = expected(component, scope, view, on)
             if value != want:
