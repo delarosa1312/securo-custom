@@ -354,6 +354,7 @@ async def find_placeholder_for_incoming(
             Transaction.account_id == account_id,
             Transaction.source == "recurring",
             Transaction.recurring_transaction_id.is_not(None),
+            RecurringTransaction.destination_account_id.is_(None),  # fork F-004: never into a transfer leg
             Transaction.external_id.is_(None),
             Transaction.currency == currency,
             Transaction.type == tx_type,
@@ -414,6 +415,7 @@ async def find_placeholder_for_incoming(
             Transaction.account_id == account_id,
             Transaction.source == "recurring",
             Transaction.recurring_transaction_id.is_not(None),
+            RecurringTransaction.destination_account_id.is_(None),  # fork F-004: never into a transfer leg
             Transaction.external_id.is_(None),
             Transaction.currency != currency,
             Transaction.type == tx_type,
@@ -513,6 +515,8 @@ async def find_bill_for_incoming(
             RecurringTransaction.is_active.is_(True),
             RecurringTransaction.currency == currency,
             RecurringTransaction.type == tx_type,
+            # Fork F-004: a bank row never fulfils a transfer schedule (no counterpart leg).
+            RecurringTransaction.destination_account_id.is_(None),
         )
     )
     charge = Movement(

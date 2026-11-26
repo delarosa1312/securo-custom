@@ -185,6 +185,22 @@ async def _bill_date_and_override(b: Base):
     await b.session.commit()
 
 
+async def _transfer_schedule(b: Base):
+    """A monthly transfer schedule (F-004): two legs, one on each account."""
+    await b.rule(b.checking, "200", date(2026, 11, 27), destination_account_id=b.savings.id)
+
+
+async def _transfer_schedule_overdue(b: Base):
+    await b.rule(b.checking, "200", date(2026, 11, 15), destination_account_id=b.savings.id, auto_generate=False)
+
+
+async def _transfer_schedule_materialized(b: Base):
+    rule = await b.rule(b.checking, "200", date(2026, 11, 27), destination_account_id=b.savings.id)
+    out_leg, in_leg = await b.transfer(b.checking, b.savings, "200", date(2026, 11, 27), status="pending")
+    out_leg.recurring_transaction_id = in_leg.recurring_transaction_id = rule.id
+    await b.session.commit()
+
+
 COMPONENTS = {
     "base": None,
     "pending_future": _pending_future,
@@ -208,6 +224,9 @@ COMPONENTS = {
     "pending_overdue_and_today": _pending_overdue_and_today,
     "month_edges": _month_edges,
     "bill_date_and_override": _bill_date_and_override,
+    "transfer_schedule": _transfer_schedule,
+    "transfer_schedule_overdue": _transfer_schedule_overdue,
+    "transfer_schedule_materialized": _transfer_schedule_materialized,
 }
 
 

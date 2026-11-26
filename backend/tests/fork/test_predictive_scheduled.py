@@ -115,3 +115,17 @@ async def test_detected_patterns_come_only_from_covered_accounts(session, test_u
     forecast = await _forecast(session, test_workspace)
 
     assert _ending(forecast, date(2026, 12, 31)) == forecast.summary.starting_liquid_balance
+
+
+@pytest.mark.asyncio
+async def test_card_rules_follow_the_card_rule(session, test_user, test_workspace, today):
+    """A recurring card bill payment and a recurring card credit count nothing; a recurring card purchase counts."""
+    b = await pdata.Base(session, test_user, test_workspace).build()
+    card = await _card(b)
+    await b.rule(card, "15", date(2026, 11, 25))  # streaming on the card
+    await b.rule(card, "20", date(2026, 11, 26), txn_type="credit")  # monthly cashback on the card
+    await b.rule(b.checking, "300", date(2026, 11, 28), destination_account_id=card.id, category_id=None)
+    forecast = await _forecast(session, test_workspace)
+
+    assert _ending(forecast, date(2026, 11, 30)) == Decimal("1485.00")
+    assert _ending(forecast, date(2026, 12, 31)) == Decimal("1470.00")

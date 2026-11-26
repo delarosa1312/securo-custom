@@ -51,6 +51,9 @@ import { usePrivacyMode } from '@/hooks/use-privacy-mode'
 import { useAuth } from '@/contexts/auth-context'
 import { useWorkspace } from '@/contexts/workspace-context'
 import { formatCurrency } from '@/lib/format'
+import { TRANSFER_TYPE, isTransferSchedule, needsReceivedAmount, transferPayload, type ScheduleKind } from '@/fork/recurring-transfers/transfer'
+import { TransferAccountsFields } from '@/fork/recurring-transfers/transfer-accounts-fields'
+import { TransferRoute } from '@/fork/recurring-transfers/transfer-route'
 
 const TH = 'text-xs font-medium text-muted-foreground py-3'
 
@@ -213,7 +216,7 @@ function RecurringTab() {
       setDialogOpen(false)
       toast.success(t('recurring.created'))
     },
-    onError: () => toast.error(t('common.error')),
+    onError: (err: unknown, data) => toast.error(isTransferSchedule(data) ? extractApiError(err, t('common.error')) : t('common.error')),
   })
 
   const updateMutation = useMutation({
@@ -226,7 +229,7 @@ function RecurringTab() {
       setEditing(null)
       toast.success(t('recurring.updated'))
     },
-    onError: () => toast.error(t('common.error')),
+    onError: (err: unknown, data) => toast.error(isTransferSchedule(data) ? extractApiError(err, t('common.error')) : t('common.error')),
   })
 
   const deleteMutation = useMutation({
@@ -321,9 +324,10 @@ function RecurringTab() {
                       {rt.description}
                       {isSplitByCategory(rt) && <CategorySplitBadge tx={rt} />}
                     </span>
+                    {isTransferSchedule(rt) && <TransferRoute schedule={rt} accounts={accountsList ?? []} />}
                   </td>
-                  <td className={`py-3 text-xs sm:text-sm font-bold tabular-nums ${rt.type === 'credit' ? 'text-emerald-600' : 'text-rose-500'}`}>
-                    {mask(ltrAmount(`${rt.type === 'credit' ? '+' : '−'}${formatCurrency(rt.amount, rt.currency, locale)}`))}
+                  <td className={`py-3 text-xs sm:text-sm font-bold tabular-nums ${isTransferSchedule(rt) ? 'text-foreground' : rt.type === 'credit' ? 'text-emerald-600' : 'text-rose-500'}`}>
+                    {mask(ltrAmount(`${isTransferSchedule(rt) ? '' : rt.type === 'credit' ? '+' : '−'}${formatCurrency(rt.amount, rt.currency, locale)}`))}
                     {rt.currency !== userCurrency && rt.amount_primary != null && (
                       <div className="flex items-center gap-1 text-[11px] font-normal text-muted-foreground">
                         <span>{mask(formatCurrency(rt.amount_primary, userCurrency, locale))}</span>
@@ -546,7 +550,7 @@ type RecurringFormProps = {
   categories: Category[]
   categoryGroups: CategoryGroup[]
   currentCategory?: Category
-  accounts: { id: string; name: string; display_name?: string | null }[]
+  accounts: { id: string; name: string; display_name?: string | null; currency?: string; is_closed?: boolean }[]
   onSave: (data: Partial<RecurringTransaction>) => void
   onCancel: () => void
   loading: boolean
@@ -618,7 +622,14 @@ function RecurringFormFields({
       ? list
       : [{ code: currency, symbol: currency, name: currency, flag: '' }, ...list]
   }, [supportedCurrencies, userCurrency, currency])
-  const [type, setType] = useState<'debit' | 'credit'>(recurring?.type ?? initial?.type ?? 'debit')
+  const wasTransfer = isTransferSchedule(recurring)
+  const [type, setType] = useState<ScheduleKind>(wasTransfer ? TRANSFER_TYPE : recurring?.type ?? initial?.type ?? 'debit')
+  const isTransfer = type === TRANSFER_TYPE
+  const [destinationId, setDestinationId] = useState(recurring?.destination_account_id ?? '')
+  const [receivedAmount, setReceivedAmount] = useState(
+    recurring?.destination_amount != null ? formatAmountInput(Number(recurring.destination_amount), displayLocale, 2, 2) : '',
+  )
+  const parsedReceived = parseAmountInput(receivedAmount, displayLocale)
   const [frequency, setFrequency] = useState(recurring?.frequency ?? initial?.frequency ?? 'monthly')
   const [weekendAdjustment, setWeekendAdjustment] = useState<RecurringTransaction['weekend_adjustment']>(
     recurring?.weekend_adjustment ?? initial?.weekend_adjustment ?? 'none'
@@ -630,6 +641,16 @@ function RecurringFormFields({
   const [endDate, setEndDate] = useState(recurring?.end_date ?? initial?.end_date ?? '')
   const [categoryId, setCategoryId] = useState(recurring?.category_id ?? initial?.category_id ?? '')
   const [accountId, setAccountId] = useState(recurring?.account_id ?? initial?.account_id ?? '')
+  const sourceAccount = sortedAccounts.find((account) => account.id === accountId)
+  const showReceived = isTransfer && needsReceivedAmount(
+    sourceAccount, sortedAccounts.find((account) => account.id === destinationId),
+  )
+  // A closed destination is not in the list: its amount received stays as it was.
+  const keptReceived = !sortedAccounts.some((account) => account.id === destinationId) && recurring?.destination_amount != null
+    ? Number(recurring.destination_amount)
+    : null
+  // A transfer moves money in its source account's currency.
+  const effectiveCurrency = isTransfer ? sourceAccount?.currency ?? currency : currency
   const [isActive, setIsActive] = useState(recurring?.is_active ?? initial?.is_active ?? true)
   const [autoGenerate, setAutoGenerate] = useState(recurring?.auto_generate ?? initial?.auto_generate ?? true)
   // Split across categories, as in the transaction dialog: every occurrence
@@ -670,11 +691,12 @@ function RecurringFormFields({
       onSubmit={(e) => {
         e.preventDefault()
         if (parsedAmount == null) return
+        if (showReceived && parsedReceived == null) return
         onSave({
           description,
           amount: parsedAmount,
-          currency,
-          type,
+          currency: effectiveCurrency,
+          type: type === TRANSFER_TYPE ? 'debit' : type,
           frequency,
           weekend_adjustment: weekendAdjustment,
           day_of_month: dayOfMonth ? parseInt(dayOfMonth) : null,
@@ -689,6 +711,7 @@ function RecurringFormFields({
             : hadInitialLines
               ? { category_lines: { share_type: 'exact', lines: [] } }
               : {}),
+          ...transferPayload(type, wasTransfer, destinationId, showReceived ? parsedReceived : keptReceived),
         } as Partial<RecurringTransaction>)
       }}
       className="space-y-4"
@@ -718,7 +741,7 @@ function RecurringFormFields({
         </div>
         <div className="space-y-2">
           <Label>{t('recurring.currency')}</Label>
-          <select className={selectClass} value={currency} onChange={(e) => setCurrency(e.target.value)}>
+          <select className={selectClass} value={effectiveCurrency} onChange={(e) => setCurrency(e.target.value)} disabled={isTransfer}>
             {currencyOptions.map((c) => (
               <option key={c.code} value={c.code}>{c.flag} {c.name}</option>
             ))}
@@ -726,9 +749,22 @@ function RecurringFormFields({
         </div>
         <div className="space-y-2">
           <Label>{t('recurring.type')}</Label>
-          <select className={selectClass} value={type} onChange={(e) => setType(e.target.value as 'debit' | 'credit')}>
+          <select
+            className={selectClass}
+            value={type}
+            onChange={(e) => {
+              const next = e.target.value as ScheduleKind
+              // A transfer has no category: it is never income or expense.
+              if (next === TRANSFER_TYPE) {
+                setLineRows(null)
+                setCategoryId('')
+              }
+              setType(next)
+            }}
+          >
             <option value="debit">{t('recurring.expense')}</option>
             <option value="credit">{t('recurring.income')}</option>
+            <option value={TRANSFER_TYPE}>{t('fork.recurringTransfers.typeTransfer')}</option>
           </select>
         </div>
       </div>
@@ -773,6 +809,23 @@ function RecurringFormFields({
           <DatePickerInput value={endDate} onChange={setEndDate} placeholder={t('recurring.endDate')} className="w-full justify-start" />
         </div>
       </div>
+      {isTransfer ? (
+        <TransferAccountsFields
+          accounts={sortedAccounts}
+          sourceId={accountId}
+          onSourceChange={(id) => {
+            setAccountId(id)
+            if (id === destinationId) setDestinationId('')
+          }}
+          destinationId={destinationId}
+          onDestinationChange={setDestinationId}
+          receivedAmount={receivedAmount}
+          onReceivedAmountChange={setReceivedAmount}
+          receivedInvalid={receivedAmount !== '' && parsedReceived == null}
+          displayLocale={displayLocale}
+          selectClass={selectClass}
+        />
+      ) : (
       <div className="grid grid-cols-2 gap-4">
         <div className="space-y-2">
           <div className="flex items-center justify-between min-h-5">
@@ -824,6 +877,7 @@ function RecurringFormFields({
           </select>
         </div>
       </div>
+      )}
       {lineRows && (
         <TransactionCategoryLinesSection
           amount={parsedAmount ?? 0}

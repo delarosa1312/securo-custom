@@ -97,6 +97,36 @@ pin both to the issue's worked example so they cannot drift apart unnoticed. The
 `/api/accounts` so the existing `accounts` token scope covers it; it is mounted before upstream's accounts
 router because `/{account_id}` would otherwise take the path.
 
+## D-011 F-004: an occurrence ledger and a row lock for every schedule; a transfer occurrence is one pair (2026-11-26, #6)
+
+Upstream's `generate_pending` reads due schedules without a lock and advances each pointer in memory, so the
+hourly job and the Generate button (or two workers) can write the same occurrence twice. The fork adds
+`recurring_occurrences` (migration `f002`): one row per schedule and nominal occurrence date, unique, with a
+state (`generated`; `skipped` and `overridden` are reserved for F-005, #7) and the transaction it produced.
+Generation takes the schedules in id order, locks each row (`SELECT ... FOR UPDATE`, re-reading its pointer) and
+claims the occurrence in a savepoint before writing; a claim that loses the unique key advances the pointer and
+writes nothing. This covers every schedule, not only transfers, and is tested on PostgreSQL with two racing runs,
+with the lock and with the unique key alone.
+
+A transfer schedule is an upstream `recurring_transactions` row with `destination_account_id`, and
+`destination_amount` between currencies (the only rate policy: the user fixes the amount received; without it a
+cross-currency schedule is refused). The source is `account_id`, the type debit, no category. Both legs of an
+occurrence carry `recurring_transaction_id`, so upstream's "already generated" checks and projection suppression
+see each account's leg; the month summary, which expects one row per occurrence, counts transfer schedules apart.
+Projections expand a transfer schedule into two leg proxies in fork code, and views that count income and
+expense drop them. Upstream's on-demand FX sync commits the session, so it runs before the pair's savepoint and
+the legs are stamped from stored rates only: the pair stays one unit. That commit releases the schedule lock
+early; the unique claim still keeps the occurrence single. Bank rows never match a transfer schedule or leg: on a
+bank-connected account the generated pending leg stays beside the bank's own row, and on a manual account a
+statement import lands beside the posted leg, as an unpaired debit, until the user resolves it (deleting a leg
+deletes both legs of the pair). Upstream does upgrade an ordinary generated placeholder in place; letting it do so
+for a transfer leg could rewrite one leg's amount under a tolerance and leave the pair unequal, so no matching was
+added here (coordinator, 2026-11-26).
+
+An edit that leaves a transfer's fields alone (deactivating, an end date, a new description or amount) is not
+judged again, so a schedule whose account was closed can still be stopped; changing an account or the amount
+received is judged in full and refused while an account is closed.
+
 ## D-012 F-006: projections agree by shared rules, not one engine (2026-11-26, #8)
 
 The dashboard card, chart, Cash Flow report, calendar and predictive forecast keep their own code. Each gets
@@ -108,3 +138,56 @@ date; the predictive forecast follows included liquid accounts and card spending
 tomorrow; scheduled credits net against budget spending (Q9), never below zero. Differences that answer another
 question (predictive scope and currency, accrual Cash Flow timing, the chart's current month) stay and are
 listed there.
+
+## D-013 Releases: our own images from a script, one tag variable, two rollbacks (2026-11-26, #2)
+
+Production runs upstream's prebuilt images on Coolify. Our images replace every backend-image service and the
+frontend at once, because they must agree on the migration heads. Choices:
+- The release logic lives in `fork/release/` (`build.sh`, `record.py`, tested by `test.sh`), and
+  `.github/workflows/fork-release.yml` only calls it: the fork had never run a workflow, and the same script
+  proves itself locally. Images build from `git archive` of a commit on `main` that contains the upstream base
+  tag, so nothing untracked reaches them. The image tag is the version verbatim (`v0.22.0-custom.1`); upstream's
+  `type=semver` would treat `-custom.1` as a prerelease, and no `latest` is pushed.
+- The production override changes images only, with one required variable `SECURO_CUSTOM_TAG` (`${...:?}`): a
+  missing tag stops the deploy, and moving between custom releases is one variable. Coolify takes one compose
+  file per resource, so `render.py` merges upstream's file with our overrides without interpolating into
+  `fork/deploy/coolify/*.yml`, and `check.sh` fails when they are stale after an upstream sync.
+- Health checks and limits start in staging only; production keeps upstream's settings until staging has run on
+  them.
+- Rollback A (keeps data): `alembic downgrade fork@<previous fork head>` with the new image, then the previous
+  images; back to stock `alembic downgrade fork@f000` then `alembic downgrade fork@f000-1`, which removes the
+  empty root. Always `fork@`: a bare `f000-1` resolves to `131` and Alembic then also downgrades every upstream
+  migration above `131` (checked against Alembic's revision logic in the #2 deep review). Rollback B: restore the
+  pre-deploy `pg_dump -Fc` (read to the end before anything is stopped) into a side database, swap it in, restore
+  the volumes. `record.py` says which applies: a release that moved upstream's line since the previous release
+  (or, for a return to stock, past the fork root's parent) can only be restored.
+Rehearsed on synthetic data in #2 (DEPLOY.md, Rehearsal).
+
+## D-014 Upstream sync: one script, a thin workflow, proposals only (2026-11-26, #3)
+
+Upstream releases every few days and the fork must stay cheap to upgrade. `fork/tools/sync_upstream.py` (stdlib,
+`git` and `gh`) holds all the logic and runs the same way by hand and in `.github/workflows/fork-upstream-sync.yml`,
+which only schedules it. It merges stable release tags only, never upstream `main`; fast-forwards `upstream-main`
+only with a plain push when a release is synced; trial-merges in a temporary detached worktree; and proposes a pull
+request (clean) or an issue (conflicts, or a push GitHub refused). It never resolves a conflict, force-pushes,
+merges, tags or deploys, and a dry run is the default. Overlaps are computed from git (files both upstream and
+`main` changed since the base tag) and matched to the patch inventory, so a hook missing from the inventory shows up
+as drift instead of being missed. The migration check upgrades a scratch database with `main` first and the merge
+second, the deploy path. Security comes from upstream advisories first and release-note words second, since
+`v0.19.0` fixed an advisory its notes do not mention.
+The workflow runs in two jobs (review of #3): the release's own code (chain checks, uv, alembic) runs only in a
+read-only job, and the write job runs git and `gh` only, redoing the merge and refusing unless its tree equals the
+tested one, so a compromised release cannot use the write token before a person reviews it. Residual: the
+migration results the write job publishes come from the job that ran the release's code; tree equality guards what
+is pushed, not that text (the tool keeps it inert: mentions and markers defanged, fences closed). The read-only job
+uses no cache, so the release's code cannot plant one that `main`'s CI restores. A dry run with failed checks fails
+in the read-only job, since it has no write job. The tool owns only a
+marked block of a proposal's body, so notes added by hand survive the daily run, and it lists files a person changed
+on the sync branch instead of calling the merge untouched.
+Consequences: with the default token most syncs need one local command, because GitHub refuses that token's pushes
+of workflow-file changes (an optional `FORK_SYNC_TOKEN` removes the step; it is a secret of the `fork-sync`
+environment limited to `main`, because a repository secret would reach the release's own workflows on the pushed
+sync branch); upstream workflow files run in the fork once merged, so the report lists them for review; while "Allow GitHub Actions to create
+and approve pull requests" is off, a clean sync needs one click to open its pull request; a pull request opened by
+the default token starts no CI, so the tool dispatches `ci.yml` (`actions: write`) and links the run; the closed
+proposals' branches stay until Matheus deletes them.

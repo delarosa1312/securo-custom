@@ -383,6 +383,8 @@ async def _suggest_recurring(
         select(RecurringTransaction).where(
             RecurringTransaction.workspace_id == workspace_id,
             RecurringTransaction.is_active.is_(True),
+            # Fork F-004: a transfer schedule is not a bill a single row can pay.
+            RecurringTransaction.destination_account_id.is_(None),
         )
     )
     bills = list(result.scalars().all())

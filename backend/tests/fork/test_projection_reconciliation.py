@@ -56,6 +56,16 @@ MOVES: dict[str, list[tuple[date, str, str]]] = {
     ],
     # Billed or reported after their own date (a manual bill date, a reporting override): balances move on the date.
     "bill_date_and_override": [(D(2026, 11, 25), "-70", "card"), (D(2026, 11, 26), "-100", "checking")],
+    # F-004 transfer schedules: each leg on its own account; overdue and materialized like any rule.
+    "transfer_schedule": [
+        (D(2026, 11, 27), "-200", "checking"), (D(2026, 11, 27), "200", "savings"),
+        (D(2026, 12, 27), "-200", "checking"), (D(2026, 12, 27), "200", "savings"),
+    ],
+    "transfer_schedule_overdue": [(D(2026, 12, 15), "-200", "checking"), (D(2026, 12, 15), "200", "savings")],
+    "transfer_schedule_materialized": [
+        (D(2026, 11, 27), "-200", "checking"), (D(2026, 11, 27), "200", "savings"),
+        (D(2026, 12, 27), "-200", "checking"), (D(2026, 12, 27), "200", "savings"),
+    ],
 }
 
 # Moves a view leaves out by design (docs/fork/PROJECTIONS.md), keyed by (component, view).

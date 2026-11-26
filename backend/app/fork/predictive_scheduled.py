@@ -20,7 +20,7 @@ accounts:
 from __future__ import annotations
 
 import uuid
-from collections.abc import Iterable, Mapping
+from collections.abc import Collection, Iterable, Mapping
 from dataclasses import dataclass, field
 from datetime import date, timedelta
 from decimal import Decimal
@@ -56,6 +56,10 @@ def covered_account_ids(accounts: Iterable[Mapping[str, Any]]) -> set[Any]:
     }
 
 
+def card_account_ids(accounts: Iterable[Mapping[str, Any]]) -> set[Any]:
+    return {account["id"] for account in accounts if account.get("type") == CARD_TYPE}
+
+
 async def ignored_category_ids(session: AsyncSession, workspace_id: uuid.UUID) -> set[uuid.UUID]:
     result = await session.execute(
         select(Category.id).where(Category.workspace_id == workspace_id, Category.is_ignored.is_(True))
@@ -63,9 +67,19 @@ async def ignored_category_ids(session: AsyncSession, workspace_id: uuid.UUID) -
     return set(result.scalars().all())
 
 
-def rule_counts(rule, covered: set[Any], ignored: set[uuid.UUID]) -> bool:
-    """Whether a manual rule's occurrences belong in the forecast."""
+def rule_counts(rule, covered: set[Any], ignored: set[uuid.UUID], cards: Collection[Any] = frozenset()) -> bool:
+    """Whether a manual rule's occurrences belong in the forecast.
+
+    The card rule holds for schedules too: a card credit, and either leg of a transfer schedule touching a
+    card (a bill payment), count nothing; card spending counts when it happens.
+    """
     if rule.category_id is not None and rule.category_id in ignored:
+        return False
+    if getattr(rule, "transfer_leg", False) and (
+        rule.account_id in cards or rule.counterpart_account_id in cards
+    ):
+        return False
+    if rule.account_id in cards and rule.type == "credit":
         return False
     # A legacy rule without an account keeps upstream's treatment.
     return rule.account_id is None or rule.account_id in covered

@@ -801,7 +801,7 @@ function DayCell({
         <div className="mt-3 space-y-1.5 pe-1">
           {previewItems.map((item) => (
             <DayPreviewRow
-              key={`${item.kind}-${item.id ?? item.recurring_id}-${item.date}`}
+              key={`${item.kind}-${item.id ?? `${item.recurring_id}-${item.account_id}`}-${item.date}`}
               item={item}
               locale={locale}
               mask={mask}
@@ -1061,7 +1061,7 @@ function MobileDayRow({
         <div className="mt-2 space-y-1.5">
           {previewItems.map((item) => (
             <DayPreviewRow
-              key={`${item.kind}-${item.id ?? item.recurring_id}-${item.date}`}
+              key={`${item.kind}-${item.id ?? `${item.recurring_id}-${item.account_id}`}-${item.date}`}
               item={item}
               locale={locale}
               mask={mask}
@@ -1204,7 +1204,7 @@ function SelectedDayPanel({
         ) : (
           day.items.map((item) => (
             <CalendarItemRow
-              key={`${item.kind}-${item.id ?? item.recurring_id}-${item.date}`}
+              key={`${item.kind}-${item.id ?? `${item.recurring_id}-${item.account_id}`}-${item.date}`}
               item={item}
               account={item.account_id ? accountById.get(item.account_id) : undefined}
               locale={locale}

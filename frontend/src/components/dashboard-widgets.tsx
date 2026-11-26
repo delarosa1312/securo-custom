@@ -327,7 +327,7 @@ export function UpcomingWidget({ scope }: { scope: DashboardScope }) {
             const amount = Number(row.amount_primary ?? row.amount)
             const currency = row.amount_primary != null ? scope.currency : row.currency
             return (
-              <li key={`${row.recurring_id}-${row.date}`} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
+              <li key={`${row.recurring_id}-${row.account_id}-${row.date}`} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
                 <CategoryIcon icon={row.category_icon} color={row.category_color} size="sm" />
                 <span className="min-w-0 flex-1 truncate text-sm">{row.description}</span>
                 <span className={cn('text-sm font-semibold tabular-nums', row.type === 'credit' ? 'text-emerald-600 dark:text-emerald-400' : 'text-foreground')}>

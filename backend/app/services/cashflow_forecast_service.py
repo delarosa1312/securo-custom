@@ -23,6 +23,7 @@ from app.schemas.forecast import (
 from app.core.config import get_settings
 from app.fork.available_balance import counts_as_available, left_out_account_ids
 from app.fork import predictive_scheduled as fork_scheduled
+from app.fork.recurring_transfers import predictive_view
 from app.services import account_service, recurring_detector_service
 from app.services.fx_rate_service import convert_or_none
 from app.services.recurring_transaction_service import get_occurrences_in_range
@@ -204,6 +205,7 @@ async def generate_cashflow_forecast(
     left_out = left_out_account_ids(accounts)
     # Fork F-006: the scheduled layer the other projections count (app/fork/predictive_scheduled.py).
     covered = fork_scheduled.covered_account_ids(accounts)
+    cards = fork_scheduled.card_account_ids(accounts)
     ignored_categories = await fork_scheduled.ignored_category_ids(session, workspace_id)
 
     # 2. Fetch manual recurring transactions in workspace
@@ -243,6 +245,10 @@ async def generate_cashflow_forecast(
         session, workspace_id, manual_recurring_ids, today, end_date,
     )
     for r in manual_recurrings:
+        # Fork F-004: a transfer counts only where it crosses the edge of available money.
+        r = predictive_view(r, accounts)
+        if r is None:
+            continue
         if r.account_id in left_out:  # fork F-001
             continue
         direction = FlowDirectionEnum.INFLOW if r.type == "credit" else FlowDirectionEnum.OUTFLOW
@@ -264,7 +270,7 @@ async def generate_cashflow_forecast(
         if amount is None:
             unconverted_currencies.add(r.currency)
             continue
-        if not fork_scheduled.rule_counts(r, covered, ignored_categories):  # fork F-006
+        if not fork_scheduled.rule_counts(r, covered, ignored_categories, cards):  # fork F-006
             continue
         occurrences = get_occurrences_in_range(
             start=r.next_occurrence,

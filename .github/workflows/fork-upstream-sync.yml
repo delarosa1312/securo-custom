@@ -1,0 +1,138 @@
+# Fork-only (docs/fork/UPSTREAM.md, D-014): checks daily for a new stable upstream Securo release and proposes the
+# sync as a pull request, or an issue when it cannot. All logic is in fork/tools/sync_upstream.py, which never
+# resolves a conflict, force-pushes, merges a pull request, tags or deploys. This file only schedules it.
+#
+# Two jobs so that upstream's code never runs next to a write token: `check` runs the release's own scripts
+# (migration chains, uv, alembic) with a read-only token and no persisted credentials; `propose` holds the write
+# permissions, runs only git and gh from main's copy of the tool, redoes the merge and refuses unless it gives the
+# exact tree `check` tested.
+name: Fork upstream sync
+
+on:
+  schedule:
+    - cron: "17 7 * * *"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Published stable upstream release to sync to (empty: the newest)"
+        required: false
+        default: ""
+      dry_run:
+        description: "Report only: push nothing, write nothing on GitHub"
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: fork-upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  check:
+    name: Trial merge and migration checks
+    if: github.repository == 'delarosa1312/securo-custom'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    services:
+      # Empty scratch database: `alembic upgrade heads` with main first, then with the merge.
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: sync
+          POSTGRES_PASSWORD: sync
+          POSTGRES_DB: sync
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U sync"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+
+      # No cache: this job runs the release's own code, which must not write a cache that main's CI restores.
+      - name: Set up uv
+        uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+        with:
+          version: "0.13.0"
+          enable-cache: false
+
+      - name: Trial merge and checks (writes nothing)
+        env:
+          # Read-only token for gh's reads of upstream releases and advisories; the tool keeps it away from
+          # every command that runs upstream code.
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          args=(--checks-only --out "$RUNNER_TEMP/fork-sync" --alembic-db "postgresql+asyncpg://sync:sync@127.0.0.1:5432/sync")
+          if [ -n "$TAG" ]; then args+=(--tag "$TAG"); fi
+          python3 fork/tools/sync_upstream.py "${args[@]}"
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: fork-sync-checks
+          path: ${{ runner.temp }}/fork-sync/checks.json
+          retention-days: 7
+
+      # On a scheduled or applying run the propose job publishes a failed check and fails; a dry run has no
+      # propose job, so it fails here.
+      - name: Fail a dry run whose migration checks failed
+        if: ${{ inputs.dry_run }}
+        run: python3 -c "import json,sys; sys.exit(1 if json.load(open('$RUNNER_TEMP/fork-sync/checks.json'))['failed'] else 0)"
+
+  propose:
+    name: Push and propose
+    needs: check
+    if: ${{ !inputs.dry_run }}
+    runs-on: ubuntu-latest
+    # The optional FORK_SYNC_TOKEN lives in this environment, limited to main, never as a repository secret:
+    # a repository secret would reach the release's own workflows once a sync branch is pushed with it.
+    environment: fork-sync
+    timeout-minutes: 15
+    # contents: fast-forward upstream-main, push sync/<tag>; pull-requests, issues: the proposal;
+    # actions: dispatch ci.yml on the sync branch, since a pull request opened by this token starts no run.
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+      actions: write
+    steps:
+      # FORK_SYNC_TOKEN is optional (UPSTREAM.md): without it a release that changes upstream workflow files
+      # cannot be pushed and the job opens an issue asking for a local run. Empty when the secret is absent.
+      - uses: actions/checkout@v7
+        with:
+          ref: main
+          fetch-depth: 0
+          token: ${{ secrets.FORK_SYNC_TOKEN || github.token }}
+
+      - uses: actions/download-artifact@v7
+        with:
+          name: fork-sync-checks
+          path: ${{ runner.temp }}/fork-sync-checks
+
+      - name: Push and propose
+        env:
+          GH_TOKEN: ${{ secrets.FORK_SYNC_TOKEN || github.token }}
+          HAS_SYNC_TOKEN: ${{ secrets.FORK_SYNC_TOKEN != '' }}
+          TAG: ${{ inputs.tag }}
+          GIT_AUTHOR_NAME: github-actions[bot]
+          GIT_AUTHOR_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+          GIT_COMMITTER_NAME: github-actions[bot]
+          GIT_COMMITTER_EMAIL: 41898282+github-actions[bot]@users.noreply.github.com
+        run: |
+          args=(--apply --out "$RUNNER_TEMP/fork-sync" --checks-from "$RUNNER_TEMP/fork-sync-checks/checks.json")
+          if [ -n "$TAG" ]; then args+=(--tag "$TAG"); fi
+          if [ "$HAS_SYNC_TOKEN" != "true" ]; then args+=(--dispatch-ci); fi
+          python3 fork/tools/sync_upstream.py "${args[@]}"

@@ -43,8 +43,9 @@ Each one answers a different question than the other views, so making it equal w
 
 - **Predictive forecast: money to pay bills.** Only accounts switched on for "Available balance" (F-001) plus card
   spending when it happens after today; no card debt already owed (a card row dated today or earlier, pending or
-  posted); card refunds and card bill payments do not count (paying the bill would count the spending a second
-  time, so a scheduled payment from checking to a card leaves the forecast unchanged); no investment or loan
+  posted); card refunds and card bill payments do not count, as rows or as recurring schedules (paying the bill
+  would count the spending a second time, so a scheduled payment from checking to a card leaves the forecast
+  unchanged); no investment or loan
   accounts and no claims, and detected patterns only from the accounts it follows; the workspace currency (it is
   a workspace figure, read over MCP); no account filter; a detected pattern counts unless a scheduled row of the
   same merchant stands for it within half a period (a one-off purchase at the same merchant can stand for it); the

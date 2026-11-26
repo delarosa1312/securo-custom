@@ -85,20 +85,21 @@ Two sessions never edit the same upstream file in parallel without the coordinat
 
 | File | F-001 | F-002 | F-003 | F-004 | F-005 | F-006 |
 | --- | --- | --- | --- | --- | --- | --- |
-| `app/models/account.py`, `schemas/account.py`, `services/account_service.py` | x | | | | | |
+| `app/models/account.py`, `schemas/account.py`, `services/account_service.py` | x | | | x | | |
 | `services/report_service.py` (`get_cash_flow_report`) | | x | x | | | x |
-| `services/cashflow_forecast_service.py` | x | | x | | | x |
+| `services/cashflow_forecast_service.py` | x | | x | x | | x |
 | `services/dashboard_service.py` (projection helpers) | | | | x | x | x |
 | `services/budget_service.py` | | x | | | | |
 | `services/recurring_transaction_service.py`, model, schema, router | | | | x | x | |
 | `services/transaction_calendar_service.py` | | | | x | | x |
-| `mcp_server/tools/forecast.py`, `proposals.py` | x | x | x | x | x | |
+| `mcp_server/tools/forecast.py`, `proposals.py`, `lifecycle.py` | x | x | x | x | x | |
 | `frontend/src/pages/dashboard.tsx`, `accounts.tsx` | x | | | | | |
 | `frontend/src/pages/reports.tsx`, `components/reports/` | | x | x | | | |
 | `frontend/src/pages/recurring.tsx` | | | | x | x | |
 | `frontend/src/lib/api.ts`, `types/index.ts` | x | x | x | x | x | x |
 | `tests/api_contract/baseline.json`, `core/access_token_scopes.py` | x | x | x | x | x | |
-| fork migration ids | f001 | none expected | f00n | f00n | f00n | none |
+| `services/recurring_match_service.py`, `reconciliation_service.py` | | | | x | x | |
+| fork migration ids | f001 | none expected | f00n | f002 | f00n | none |
 
 Consequences: F-001 and F-002 can run in parallel (they meet only in `api.ts`, `types/index.ts` and the contract
 baseline, which merge by hand in minutes). F-004 and F-005 share almost every recurring file and run one after

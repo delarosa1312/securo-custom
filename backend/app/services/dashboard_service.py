@@ -39,6 +39,7 @@ from app.services import invoice_forecast_service
 from app.services.admin_service import get_credit_card_accounting_mode
 from app.services.credit_card_service import compute_effective_date
 from app.services.recurring_transaction_service import get_occurrences_in_range
+from app.fork import recurring_transfers as fork_transfers
 from app.services.asset_service import get_asset_values_at
 from app.services.fx_rate_service import _resolve_rate, convert
 from app.services.viewer_currency import viewer_currency
@@ -193,12 +194,16 @@ async def _get_recurring_projections(
         .where(*filters)
     )
     if account_ids:
-        stmt = stmt.where(RecurringTransaction.account_id.in_(account_ids))
+        stmt = stmt.where(fork_transfers.touches_accounts(account_ids))  # fork F-004
     # Fork F-006: like forecast rows, nothing projects from a closed account.
     from app.fork.projection_consistency import on_open_account
     stmt = on_open_account(stmt)
     result = await session.execute(stmt)
-    recurring_list = list(result.scalars().all())
+    # Fork F-004: a transfer schedule reads as its two legs here, or not at all in P&L views.
+    recurring_list = await fork_transfers.expand_legs(
+        session, list(result.scalars().all()), account_ids,
+        include_transfers=include_transfer_like,
+    )
     card_cycles = (
         await _card_cycles(
             session, workspace_id, {rec.account_id for rec in recurring_list if rec.account_id}
@@ -1295,11 +1300,15 @@ async def get_projected_transactions(
         )
     )
     if account_id is not None:
-        stmt = stmt.where(RecurringTransaction.account_id == account_id)
+        stmt = stmt.where(fork_transfers.touches_accounts([account_id]))  # fork F-004
     from app.fork.projection_consistency import on_open_account  # fork F-006
     stmt = on_open_account(stmt)
     result = await session.execute(stmt)
-    recurring_list = list(result.scalars().all())
+    # Fork F-004: a transfer schedule is listed as its two legs (one per account).
+    recurring_list = await fork_transfers.expand_legs(
+        session, list(result.scalars().all()),
+        [account_id] if account_id is not None else None,
+    )
     card_cycles = (
         await _card_cycles(
             session, workspace_id, {rec.account_id for rec in recurring_list if rec.account_id}
@@ -1341,7 +1350,7 @@ async def get_projected_transactions(
         cat_name, cat_icon, cat_color, cat_is_transfer = (
             cat_map.get(rec.category_id, (None, None, None, False))
             if rec.category_id
-            else (None, None, None, False)
+            else (None, None, None, fork_transfers.is_transfer_leg(rec))  # fork F-004
         )
 
         # Convert to primary currency at the latest real rate. A missing rate

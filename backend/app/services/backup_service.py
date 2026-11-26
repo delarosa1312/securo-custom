@@ -344,6 +344,9 @@ BOTH_NAMES = list(dict.fromkeys([*DATA_NAMES, *CONFIG_NAMES]))
 # silently and leave a partial archive behind.
 EXCLUDED_WORKSPACE_TABLES: dict[str, str] = {
     "access_tokens": "API access secrets",
+    # Fork F-004: generation bookkeeping; a restored schedule's pointer already keeps its
+    # generated occurrences from being written again.
+    "recurring_occurrences": "which recurring occurrences generation already wrote",
     "agents": "AI agent setup of the optional agents module, tied to its provider",
     "agent_conversations": "chat history with AI agents",
     "bank_connections": "provider secrets and bank sessions",
