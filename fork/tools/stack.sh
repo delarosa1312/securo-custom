@@ -53,11 +53,11 @@ case "${1:-}" in
     guard_owner
     # The image build copies backend/, Vite reads frontend/.env*, and the frontend mounts the worktree read-only:
     # none of them may carry real configuration. Existence check only; the files are never read.
-    shopt -s nullglob
-    found=("$root"/.env* "$root"/backend/.env* "$root"/frontend/.env* "$root"/secrets "$root"/backend/secrets)
-    shopt -u nullglob
-    found=("${found[@]/%*.example/}")
-    if [[ -n ${found[*]// /} ]]; then
+    found=()
+    for f in "$root"/.env* "$root"/backend/.env* "$root"/frontend/.env* "$root"/secrets "$root"/backend/secrets; do
+      [[ -e $f && $f != *.example ]] && found+=("$f")
+    done
+    if ((${#found[@]})); then
       echo "refusing: real configuration in this worktree (${found[*]}); the stack runs without it" >&2
       exit 1
     fi

@@ -66,7 +66,9 @@ registry or orchestration framework until a concrete need shows up twice.
 
 Upstream has no end-to-end suite. `fork/tools/stack.sh` runs upstream's `docker-compose.yml` plus
 `fork/stack/compose.yml` (own project name, loopback ports, project volumes, no host secrets or backup folder,
-agents profile on for MCP) built from the worktree. `fork/stack/seed.py` loads a synthetic data set through the
+agents profile on for MCP, a scrubbed environment) built from the worktree. The backend runs from its image, not
+upstream's `./backend:/app` bind mount: with the mount, root-owned folders and caches landed in the worktree and
+35 host backend tests then failed on permissions. `fork/stack/seed.py` loads a synthetic data set through the
 public REST API (stdlib only), so the seed follows upstream's validation instead of writing rows directly;
 `backend/scripts/seed_perf.py` was not enough (no budgets, pending rows, installments or transfers). Scenarios
 live in `fork/e2e/` with their own `package.json` (Playwright, the machine's Chromium), so `frontend/package.json`

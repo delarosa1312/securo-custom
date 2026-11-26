@@ -140,11 +140,14 @@ FORK_E2E_OUT=~/scratch/securo-custom/<issue>/e2e npx playwright test [scenarios/
 fork/tools/stack.sh down      # stop and delete the stack and its volumes
 ```
 
-- One stack per machine (project `securo-custom-e2e`). `up` and `down` refuse while another worktree owns the
-  running stack; the owner runs `down` first. The backend and frontend mount the worktree, so code edits reload
-  without a rebuild; a dependency or migration change needs `down` and `up`.
-- `up` refuses when a `.env` exists in the worktree: the stack runs on upstream defaults plus
-  `fork/stack/compose.yml`, never on real configuration.
+- One stack per machine (project `securo-custom-e2e`). `up` and `down` refuse while another worktree owns its
+  containers or volumes, even stopped ones; the owner runs `down` first.
+- The backend services run the image built from the worktree (no bind mount, so nothing root-owned lands in the
+  worktree): after a backend change run `up` again (cached rebuild). The frontend dev server mounts
+  `frontend/` and reloads. A migration change needs `down`, `up` and `seed`.
+- Real configuration never reaches the stack: Compose runs with a scrubbed environment (only the three port
+  variables), and `up` refuses when a `.env*` (other than `.env.example`) or a `secrets/` folder exists in the
+  worktree.
 - Seed (`fork/stack/seed.py`): login `e2e@example.com` / `Synthetic-E2E-2026` (local stack only), three accounts
   (checking, savings, credit card), three months of posted history, pending rows in the past and the future, an
   installment series of ten parcels, transfers in the past and the future, four monthly recurring schedules,
