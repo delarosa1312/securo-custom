@@ -40,6 +40,10 @@ class Impact:
     edited: list[RowImpact] = field(default_factory=list)
     skipped_kept: list[date] = field(default_factory=list)
     skipped_dropped: list[date] = field(default_factory=list)
+    # Not shown: the latest occurrence kept as history and the earliest one removed, so a pointer
+    # moved back after a removal never reaches a posted row (which generation would repeat).
+    last_history: Optional[date] = None
+    first_removed: Optional[date] = None
 
 
 def current_day(rec: RecurringTransaction) -> date:
@@ -106,6 +110,11 @@ def is_scheduled(tx: Transaction, today: date) -> bool:
     return tx.status == "pending" or tx.date > today
 
 
+def unit_scheduled(unit: list[Transaction], today: date) -> bool:
+    """A pair is history as soon as one leg is (a posted credit under a pending bank debit)."""
+    return all(is_scheduled(tx, today) for tx in unit)
+
+
 async def classify(
     session: AsyncSession,
     parts: list[RecurringTransaction],
@@ -114,11 +123,15 @@ async def classify(
     dates_change: bool,
     removing: bool = False,
     only_after_today: bool = False,
+    shape_change: bool = False,
 ) -> tuple[Impact, list[list[Transaction]], list[list[Transaction]], list[list[Transaction]]]:
-    """Sort the series' rows dated on or after ``from_date``: (impact, follow, remove, edited).
+    """Sort the series' occurrences from ``from_date`` on: (impact, follow, remove, edited).
 
+    An occurrence belongs where its nominal date (the ledger's) falls, whatever its row's date.
     ``removing`` (end, delete): scheduled rows are offered for deletion instead of following.
     ``only_after_today``: rows dated today or earlier are left alone (delete keeps what is due).
+    ``shape_change`` (a schedule becoming or ceasing to be a transfer): a row cannot follow it,
+    so every scheduled one is removed.
     """
     ids = [part.id for part in parts]
     workspace_id = parts[0].workspace_id
@@ -132,22 +145,25 @@ async def classify(
         head = unit[0]
         entry = next((ledger[tx.id] for tx in unit if tx.id in ledger), None)
         occurrence_day = entry.occurrence_date if entry is not None else head.date
-        if occurrence_day < from_date and head.date < from_date:
+        if occurrence_day < from_date:
             continue
         if only_after_today and head.date <= today:
             continue
-        if not is_scheduled(head, today):
+        if not unit_scheduled(unit, today):
             impact.history += 1
+            impact.last_history = max(impact.last_history or occurrence_day, occurrence_day)
             continue
-        if removing:
+        if removing or shape_change:
             remove.append(unit)
             impact.removed.append(row_impact(unit))
+            impact.first_removed = min(impact.first_removed or occurrence_day, occurrence_day)
         elif entry is not None and entry.state == "overridden" and not (dates_change and head.date > today):
             edited.append(unit)
             impact.edited.append(row_impact(unit))
         elif dates_change and head.date > today:
             remove.append(unit)
             impact.removed.append(row_impact(unit))
+            impact.first_removed = min(impact.first_removed or occurrence_day, occurrence_day)
         else:
             follow.append(unit)
             impact.follow.append(row_impact(unit))

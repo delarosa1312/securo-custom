@@ -20,6 +20,14 @@ IN_DELETED = (
 )
 
 
+def refuse_deleted(rec: RecurringTransaction) -> None:
+    """An edit never brings a deleted schedule back (it would generate while hidden): Restore does."""
+    if rec.deleted_at is not None:
+        from app.fork.recurring_lifecycle import DELETED
+
+        raise ValueError(DELETED)
+
+
 def with_status(stmt: Any, status: Optional[str]) -> Any:
     if status == "all":
         return stmt

@@ -32,6 +32,7 @@ from app.fork.recurring_lifecycle import (
     LifecycleNotFound,
     advance_past_handled,
     effective,
+    intended_day,
     lock,
     nominal_dates,
 )
@@ -42,13 +43,16 @@ from app.fork.recurring_series_rows import (
     delete_units,
     follow_change,
     follow_edited,
+    ledger_by_tx,
 )
 from app.models.recurring_transaction import RecurringTransaction
 from app.models.transaction import Transaction
 from app.schemas.recurring_transaction import RecurringTransactionCreate, RecurringTransactionUpdate
 
-# Fields whose change moves the occurrence dates.
+# Fields whose change moves the rows' dates; only the first two move the nominal dates (skips,
+# the ledger and the split's first occurrence are nominal).
 DATE_FIELDS = ("frequency", "day_of_month", "weekend_adjustment")
+NOMINAL_FIELDS = ("frequency", "day_of_month")
 # Fields a split may change (the rest belongs to the series: start, end, activity).
 CHANGEABLE = (
     "description", "amount", "currency", "type", "account_id", "destination_account_id",
@@ -61,7 +65,43 @@ NOTHING_TO_CHANGE = "Nothing to change"
 NOT_THE_CURRENT_PART = "This part of the series has ended; change its current part"
 NOT_DELETED = "Only a deleted recurring transaction can be deleted permanently or restored"
 END_BEFORE_START = "The last occurrence cannot be before the series starts; delete it instead"
+END_BEFORE_PART = "The last occurrence cannot be before {date}, when the current values started"
 DUPLICATE_SPLIT = "The series already changes on that date"
+NO_OCCURRENCE_LEFT = "The series has no occurrence left from that date on"
+
+
+def becomes_other_shape(rec: RecurringTransaction, changes: dict[str, Any]) -> bool:
+    """A plain schedule turning into a transfer, or back: its rows cannot follow."""
+    if "destination_account_id" not in changes:
+        return False
+    return (changes["destination_account_id"] is None) != (rec.destination_account_id is None)
+
+
+def first_on_rule(frequency: str, day: int, from_date: date) -> date:
+    """The first date on or after ``from_date`` under a new rule (weekly ones start that day)."""
+    from app.services.recurring_transaction_service import _advance_months
+
+    if frequency in ("weekly", "biweekly"):
+        return from_date
+    candidate = _advance_months(from_date.replace(day=1), 0, day)
+    return candidate if candidate >= from_date else _advance_months(from_date.replace(day=1), 1, day)
+
+
+def pointer_floor(rec: RecurringTransaction, impact: Impact, pointer: date, today: date) -> date:
+    """Where the pointer may go back to once rows to come were removed: their occurrences are
+    due again, but never at or before an occurrence kept as history."""
+    floor = min(pointer, today + timedelta(days=1))
+    if impact.first_removed is not None:
+        floor = min(floor, impact.first_removed)
+    if impact.last_history is not None:
+        floor = max(floor, impact.last_history + timedelta(days=1))
+    return max(floor, rec.start_date)
+
+
+def move_pointer_back(rec: RecurringTransaction, floor: date) -> None:
+    upcoming = nominal_dates(rec, floor, floor + timedelta(days=800), limit=1)
+    if upcoming and upcoming[0] < rec.next_occurrence:
+        rec.next_occurrence = upcoming[0]
 
 
 async def chain(session: AsyncSession, rec: RecurringTransaction) -> list[RecurringTransaction]:
@@ -104,12 +144,23 @@ def _successor_payload(
 ) -> RecurringTransactionCreate:
     from app.schemas.transaction_category_line import TransactionCategoryLinesInput
 
-    dates_change = any(key in changes and changes[key] != getattr(rec, key) for key in DATE_FIELDS)
-    if dates_change:
-        start = from_date
+    frequency = changes.get("frequency", rec.frequency)
+    weekly = frequency in ("weekly", "biweekly")
+    if weekly:
+        day_of_month = changes.get("day_of_month", rec.day_of_month)
+    else:
+        # Keep the intended day (a 31st stays a 31st after a short month).
+        kept = intended_day(rec) if rec.frequency not in ("weekly", "biweekly") else from_date.day
+        day_of_month = changes.get("day_of_month") or kept
+    if any(key in changes and changes[key] != getattr(rec, key) for key in NOMINAL_FIELDS):
+        start = first_on_rule(frequency, day_of_month or from_date.day, from_date)
+        if rec.end_date and start > rec.end_date:
+            raise ValueError(NO_OCCURRENCE_LEFT)
     else:
         upcoming = nominal_dates(rec, from_date, from_date + timedelta(days=400), limit=1)
-        start = upcoming[0] if upcoming else from_date
+        if not upcoming:
+            raise ValueError(NO_OCCURRENCE_LEFT)
+        start = upcoming[0]
     lines = changes.get("category_lines")
     if lines is None and rec.has_category_lines and rec.category_lines and "category_id" not in changes:
         from app.services import category_line_service
@@ -139,11 +190,6 @@ def _successor_payload(
             "auto_generate",
         )
     }
-    if not dates_change and rec.frequency not in ("weekly", "biweekly"):
-        # Keep the intended day (a 31st stays a 31st after a short month).
-        day_of_month = rec.day_of_month or rec.start_date.day
-    else:
-        day_of_month = changes.get("day_of_month", rec.day_of_month)
     if values["destination_account_id"] is not None and lines is not None:
         lines = None
     return RecurringTransactionCreate(
@@ -226,9 +272,14 @@ async def _warm(session: AsyncSession, rec: RecurringTransaction, on: date, *cur
 
 
 async def _split_plan(
-    session: AsyncSession, rec: RecurringTransaction, from_date: date, dates_change: bool
+    session: AsyncSession, rec: RecurringTransaction, from_date: date, changes: dict[str, Any]
 ) -> tuple[Impact, list[list[Transaction]], list[list[Transaction]], list[list[Transaction]], list[RecurringOccurrence]]:
-    impact, follow, remove, edited = await classify(session, [rec], from_date, dates_change=dates_change)
+    impact, follow, remove, edited = await classify(
+        session, [rec], from_date,
+        dates_change=any(key in changes for key in DATE_FIELDS),
+        shape_change=becomes_other_shape(rec, changes),
+    )
+    nominal_move = any(key in changes for key in NOMINAL_FIELDS)
     skipped = list(
         (
             await session.execute(
@@ -241,7 +292,7 @@ async def _split_plan(
         ).scalars().all()
     )
     days = sorted(row.occurrence_date for row in skipped)
-    if dates_change:
+    if nominal_move:
         impact.skipped_dropped = days
     else:
         impact.skipped_kept = days
@@ -287,9 +338,9 @@ async def change_from(
         raise ValueError(FROM_TOO_EARLY)
     if rec.end_date and from_date > rec.end_date:
         raise ValueError(FROM_AFTER_END)
-    dates_change = any(key in changes for key in DATE_FIELDS)
+    nominal_move = any(key in changes for key in NOMINAL_FIELDS)
     payload = _successor_payload(rec, changes, from_date)
-    impact, *_ = await _split_plan(session, rec, from_date, dates_change)
+    impact, *_ = await _split_plan(session, rec, from_date, changes)
     await _validate_successor(session, rec, payload)
     if preview:
         await session.commit()  # nothing was written: ends the transaction, releasing the row locks
@@ -297,7 +348,7 @@ async def change_from(
     await _warm(session, rec, from_date, payload.currency)
     # The warm-up may have committed: lock again and sort the rows as they are now.
     rec = await lock(session, workspace_id, recurring_id)
-    impact, follow, remove, edited, skipped = await _split_plan(session, rec, from_date, dates_change)
+    impact, follow, remove, edited, skipped = await _split_plan(session, rec, from_date, changes)
 
     was_active = bool(rec.is_active)
     old_pointer = rec.next_occurrence
@@ -307,7 +358,7 @@ async def change_from(
         rec.is_active = False
     successor = await _create_successor(session, rec, payload, active=was_active)
     today = current_day(rec)
-    floor = max(successor.start_date, old_pointer if not dates_change else min(old_pointer, today + timedelta(days=1)))
+    floor = max(successor.start_date, pointer_floor(rec, impact, old_pointer, today) if remove else old_pointer)
     upcoming = nominal_dates(successor, floor, floor + timedelta(days=800), limit=1)
     successor.next_occurrence = upcoming[0] if upcoming else floor
     if successor.end_date and successor.next_occurrence > successor.end_date:
@@ -317,7 +368,7 @@ async def change_from(
     await follow_edited(session, edited, successor)
     if skipped:
         ids = [row.id for row in skipped]
-        if dates_change:
+        if nominal_move:
             await session.execute(delete(RecurringOccurrence).where(RecurringOccurrence.id.in_(ids)))
         else:
             await session.execute(
@@ -341,7 +392,9 @@ async def whole_series_impact(
     rec = await lock(session, workspace_id, recurring_id)
     changes = update.model_dump(exclude_unset=True)
     dates_change = any(key in changes and changes[key] != getattr(rec, key) for key in DATE_FIELDS)
-    impact, *_ = await classify(session, [rec], date.min, dates_change=dates_change)
+    impact, *_ = await classify(
+        session, [rec], date.min, dates_change=dates_change, shape_change=becomes_other_shape(rec, changes)
+    )
     impact.history = 0
     await session.commit()  # nothing was written: ends the transaction, releasing the row lock
     return impact
@@ -362,6 +415,7 @@ async def correct_whole_series(
         raise LifecycleConflict(DELETED)
     changes = update.model_dump(exclude_unset=True)
     dates_change = any(key in changes and changes[key] != getattr(before, key) for key in DATE_FIELDS)
+    shape_change = becomes_other_shape(before, changes)
     updated = await recurring_transaction_service.update_recurring_transaction(
         session, recurring_id, workspace_id, update
     )
@@ -369,10 +423,16 @@ async def correct_whole_series(
         raise LifecycleNotFound("Recurring transaction not found")
     await _warm(session, updated, current_day(updated))
     rec = await lock(session, workspace_id, recurring_id)
-    impact, follow, remove, edited = await classify(session, [rec], date.min, dates_change=dates_change)
+    impact, follow, remove, edited = await classify(
+        session, [rec], date.min, dates_change=dates_change, shape_change=shape_change
+    )
     impact.history = 0
     await delete_units(session, remove)
     await follow_change(session, follow, rec)
+    if remove:
+        move_pointer_back(rec, pointer_floor(rec, impact, rec.next_occurrence, current_day(rec)))
+        await session.flush()
+        await advance_past_handled(session, rec)
     await session.commit()
     await session.refresh(rec, ["category_lines"])
     await session.refresh(rec)
@@ -394,8 +454,10 @@ async def end_series(
         raise LifecycleConflict(DELETED)
     parts = await chain(session, rec)
     rec = current_part(parts)
-    if last_date < rec.start_date:
+    if last_date < parts[0].start_date:
         raise ValueError(END_BEFORE_START)
+    if last_date < rec.start_date:
+        raise ValueError(END_BEFORE_PART.format(date=rec.start_date.isoformat()))
     after = last_date + timedelta(days=1)
     impact, _, remove, _ = await classify(session, [rec], after, dates_change=False, removing=True)
     if preview:
@@ -445,10 +507,29 @@ async def trash(
         part.is_active = False
         part.deleted_at = now
     if delete_scheduled:
+        firsts = _first_removed_by_part(remove, await ledger_by_tx(session, [part.id for part in parts]))
         await delete_units(session, remove)
+        # Their occurrences are due again once the series is restored.
+        for part in parts:
+            if part.id in firsts:
+                move_pointer_back(part, max(part.start_date, firsts[part.id]))
     ids = [part.id for part in parts]
     await session.commit()
     return ids, impact
+
+
+def _first_removed_by_part(
+    units: list[list[Transaction]], ledger: dict[uuid.UUID, RecurringOccurrence]
+) -> dict[uuid.UUID, date]:
+    firsts: dict[uuid.UUID, date] = {}
+    for unit in units:
+        head = unit[0]
+        entry = next((ledger[tx.id] for tx in unit if tx.id in ledger), None)
+        day = entry.occurrence_date if entry is not None else head.date
+        if head.recurring_transaction_id is not None:
+            part = head.recurring_transaction_id
+            firsts[part] = min(firsts.get(part, day), day)
+    return firsts
 
 
 async def _count_rows(session: AsyncSession, parts: list[RecurringTransaction]) -> int:
@@ -485,47 +566,65 @@ async def restore(
     parts = await chain(session, rec)
     head = current_part(parts)
     today = current_day(head)
-    deleted_on = head.deleted_at.date() if head.deleted_at else today
-    missed = [
-        nominal
-        for nominal in nominal_dates(head, max(head.next_occurrence, head.start_date), today + timedelta(days=3))
-        if deleted_on < effective(head, nominal) <= today
-    ] if head.active_before_delete else []
-    existing = {
-        row.occurrence_date
-        for row in (
-            await session.execute(
-                select(RecurringOccurrence).where(
-                    RecurringOccurrence.recurring_transaction_id == head.id,
-                    RecurringOccurrence.occurrence_date.in_(missed),
-                )
-            )
-        ).scalars().all()
-    } if missed else set()
-    missed = [day for day in missed if day not in existing]
+    missed: dict[uuid.UUID, list[date]] = {}
+    for part in parts:
+        if part.active_before_delete:
+            missed[part.id] = await _missed_while_deleted(session, part, today)
+    skipped = sorted(day for days in missed.values() for day in days)
     if preview:
         upcoming = nominal_dates(head, today + timedelta(days=1), today + timedelta(days=800), limit=1)
         nxt = upcoming[0] if upcoming and head.active_before_delete else None
         await session.commit()  # nothing was written: ends the transaction, releasing the row locks
-        return RestorePlan([], missed, nxt)
+        return RestorePlan([], skipped, nxt)
     for part in parts:
         part.is_active = bool(part.active_before_delete)
         part.deleted_at = None
         part.active_before_delete = None
-    for nominal in missed:
-        session.add(
-            RecurringOccurrence(
-                workspace_id=head.workspace_id,
-                recurring_transaction_id=head.id,
-                occurrence_date=nominal,
-                state="skipped",
+        for nominal in missed.get(part.id, []):
+            session.add(
+                RecurringOccurrence(
+                    workspace_id=part.workspace_id,
+                    recurring_transaction_id=part.id,
+                    occurrence_date=nominal,
+                    state="skipped",
+                )
             )
-        )
     await session.flush()
-    await advance_past_handled(session, head)
-    plan = RestorePlan([part.id for part in parts], missed, head.next_occurrence if head.is_active else None)
+    for part in parts:
+        await advance_past_handled(session, part)
+    plan = RestorePlan([part.id for part in parts], skipped, head.next_occurrence if head.is_active else None)
     await session.commit()
     return plan
+
+
+async def _missed_while_deleted(session: AsyncSession, part: RecurringTransaction, today: date) -> list[date]:
+    """Occurrences of one part that fell between its deletion and today, not in the ledger yet."""
+    from app.core.app_clock import app_timezone
+
+    stamp = part.deleted_at
+    if stamp is None:
+        return []
+    if stamp.tzinfo is None:  # SQLite hands timestamps back without their zone
+        stamp = stamp.replace(tzinfo=timezone.utc)
+    deleted_on = stamp.astimezone(app_timezone()).date()
+    days = [
+        nominal
+        for nominal in nominal_dates(part, max(part.next_occurrence, part.start_date), today + timedelta(days=3))
+        if deleted_on < effective(part, nominal) <= today
+    ]
+    if not days:
+        return []
+    existing = set(
+        (
+            await session.execute(
+                select(RecurringOccurrence.occurrence_date).where(
+                    RecurringOccurrence.recurring_transaction_id == part.id,
+                    RecurringOccurrence.occurrence_date.in_(days),
+                )
+            )
+        ).scalars().all()
+    )
+    return [day for day in days if day not in existing]
 
 
 async def purge(

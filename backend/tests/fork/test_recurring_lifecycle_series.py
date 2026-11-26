@@ -142,9 +142,10 @@ async def test_change_from_with_new_dates_removes_rows_still_to_come(session, te
     assert (await session.get(Transaction, ahead.id)) is None
     new = result.schedule
     assert new is not None
-    assert (new.start_date, new.day_of_month, new.next_occurrence) == (month_day(2, 1), 20, month_day(2, 1))
+    # The new rule's first date on or after the change date, not the change date itself.
+    assert (new.start_date, new.day_of_month, new.next_occurrence) == (month_day(2, 20), 20, month_day(2, 20))
     projected = [day for day, _, rid in await _projected(session, test_user, test_workspace) if rid == str(new.id)]
-    assert projected[:3] == [month_day(2, 1).isoformat(), month_day(3, 20).isoformat(), month_day(4, 20).isoformat()]
+    assert projected[:3] == [month_day(2, 20).isoformat(), month_day(3, 20).isoformat(), month_day(4, 20).isoformat()]
 
 
 @pytest.mark.asyncio

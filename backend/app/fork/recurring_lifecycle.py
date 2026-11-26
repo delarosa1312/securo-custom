@@ -8,7 +8,8 @@ row means "dealt with": generation never writes that occurrence (`recurring_gene
 - ``generated``: recorded as the schedule says, by generation, by "record" or by linking a row.
 
 Projections read rows, not the ledger; `handled_occurrences` is the one place they learn about
-skipped and overridden occurrences (hooked into `dashboard_service._materialized_recurring_occurrences`).
+occurrences the ledger covers (hooked into `dashboard_service._materialized_recurring_occurrences`):
+a row linked to a date other than its own would otherwise leave the occurrence projected too.
 Every write locks the schedule row first, the same lock generation takes, so the two serialize.
 """
 
@@ -30,8 +31,6 @@ from app.models.account import Account
 from app.models.recurring_transaction import RecurringTransaction
 from app.models.transaction import Transaction
 
-# Ledger states that leave a projected occurrence out (generated ones are rows the views already see).
-_HANDLED_ELSEWHERE = ("skipped", "overridden")
 # Upper bound on the occurrences listed per schedule (a weekly schedule paused for years).
 MAX_LISTED = 60
 
@@ -45,6 +44,13 @@ ACCOUNT_UNUSABLE = "The account of this recurring transaction is closed or no lo
 TRANSFER_LINK = "A recurring transfer cannot take an existing transaction as an occurrence"
 LINK_MISMATCH = "The transaction must be on the same account, with the same direction, and not linked yet"
 NEEDS_RECEIVED = "This transfer is between currencies: give the amount received as well"
+NO_RECEIVED = "An amount received is given only for a transfer between currencies"
+UNSKIP_GAP = (
+    "Occurrences after this one were passed without a transaction linked to them; undoing this "
+    "skip would write them again"
+)
+# How far a linked row may sit from its occurrence (bank and import matches post late or early).
+_MATCH_DAYS = {"weekly": 3, "biweekly": 6}
 POSITIVE = "The amount must be greater than zero"
 
 
@@ -138,11 +144,11 @@ async def handled_occurrences(
     range_start: date,
     range_end: date,
 ) -> set[tuple[uuid.UUID, date]]:
-    """``(schedule, effective date)`` of skipped and overridden occurrences in the range.
+    """``(schedule, effective date)`` of every occurrence the ledger covers in the range.
 
-    A skipped occurrence is in no view; an overridden one is its own row now (maybe on another
-    date), so the schedule's projection of it must go. Ledger dates are nominal: the weekend rule
-    moves them at most two days, hence the margin.
+    A skipped occurrence is in no view; a recorded, edited or linked one is a row now, maybe on
+    another date, so the schedule's projection of it must go. Ledger dates are nominal: the weekend
+    rule moves them at most two days, hence the margin.
     """
     if not recurring_ids:
         return set()
@@ -161,7 +167,6 @@ async def handled_occurrences(
         .where(
             RecurringOccurrence.workspace_id == workspace_id,
             RecurringOccurrence.recurring_transaction_id.in_(recurring_ids),
-            RecurringOccurrence.state.in_(_HANDLED_ELSEWHERE),
             RecurringOccurrence.occurrence_date >= range_start - timedelta(days=3),
             RecurringOccurrence.occurrence_date < range_end + timedelta(days=3),
         )
@@ -398,13 +403,17 @@ async def unskip(
     session: AsyncSession, workspace_id: uuid.UUID, recurring_id: uuid.UUID, nominal: date
 ) -> RecurringTransaction:
     """Undo a skip. When the pointer had passed the date, it goes back to it, so the occurrence is
-    due again; everything between it and the old pointer is in the ledger, so nothing repeats."""
+    due again. Every occurrence between must then be in the ledger, or generation would write it
+    again: one a bank or import match passed (upstream moves the pointer without the ledger) gets
+    its ledger row for the transaction it was matched to; one with no transaction at all refuses."""
     rec = await lock(session, workspace_id, recurring_id)
     if rec.deleted_at is not None:
         raise LifecycleConflict(DELETED)
     row = (await ledger_rows(session, {rec.id}, nominal, nominal + timedelta(days=1))).get((rec.id, nominal))
     if row is None or row.state != "skipped":
         raise LifecycleConflict(NOT_SKIPPED)
+    if nominal < rec.next_occurrence:
+        await _ledger_between(session, rec, nominal, rec.next_occurrence)
     await session.delete(row)
     if nominal < rec.next_occurrence:
         completed = rec.end_date is not None and rec.next_occurrence > rec.end_date
@@ -417,6 +426,49 @@ async def unskip(
     await advance_past_handled(session, rec)
     await session.commit()
     return rec
+
+
+async def _ledger_between(session: AsyncSession, rec: RecurringTransaction, after: date, before: date) -> None:
+    between = nominal_dates(rec, after + timedelta(days=1), before)
+    if not between:
+        return
+    known = await ledger_rows(session, {rec.id}, between[0], between[-1] + timedelta(days=1))
+    gaps = [day for day in between if (rec.id, day) not in known]
+    if not gaps:
+        return
+    claimed = set(
+        (
+            await session.execute(
+                select(RecurringOccurrence.transaction_id).where(
+                    RecurringOccurrence.recurring_transaction_id == rec.id,
+                    RecurringOccurrence.transaction_id.is_not(None),
+                )
+            )
+        ).scalars().all()
+    )
+    margin = timedelta(days=_MATCH_DAYS.get(rec.frequency, 15))
+    rows = [
+        tx
+        for tx in (
+            await session.execute(
+                select(Transaction).where(
+                    Transaction.workspace_id == rec.workspace_id,
+                    Transaction.recurring_transaction_id == rec.id,
+                    Transaction.date >= effective(rec, gaps[0]) - margin,
+                    Transaction.date <= effective(rec, gaps[-1]) + margin,
+                )
+            )
+        ).scalars().all()
+        if tx.id not in claimed and (tx.transfer_pair_id is None or tx.type == "debit")
+    ]
+    for day in gaps:
+        on = effective(rec, day)
+        near = [tx for tx in rows if abs(tx.date - on) <= margin]
+        if not near:
+            raise LifecycleConflict(UNSKIP_GAP)
+        match = min(near, key=lambda tx: (abs(tx.date - on), tx.date))
+        rows.remove(match)
+        await _claim(session, rec, day, "generated", match.id)
 
 
 async def record(
@@ -458,11 +510,15 @@ async def record(
         if not usable(rec, destination):
             raise LifecycleConflict(ACCOUNT_UNUSABLE)
         assert destination is not None
+        if account.currency == destination.currency and received is not None:
+            raise ValueError(NO_RECEIVED)
         if (
             account.currency != destination.currency
             and amount is not None and amount != rec.amount and received is None
         ):
             raise ValueError(NEEDS_RECEIVED)
+    elif received is not None:
+        raise ValueError(NO_RECEIVED)
     # Upstream's on-demand rate sync commits; it runs before anything is written, then the lock
     # is taken again and the row is stamped from stored rates (as F-004 generation does).
     currencies = [account.currency, rec.currency] + ([destination.currency] if destination else [])

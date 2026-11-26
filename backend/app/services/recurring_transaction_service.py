@@ -204,6 +204,7 @@ async def update_recurring_transaction(
     recurring = await get_recurring_transaction(session, recurring_id, workspace_id)
     if not recurring:
         return None
+    fork_status.refuse_deleted(recurring)  # fork F-005
 
     update_data = data.model_dump(exclude_unset=True)
     # Same payload rules as a transaction: absent keeps the parts, a list
