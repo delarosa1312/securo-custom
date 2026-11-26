@@ -16,6 +16,7 @@ type Report = {
   summary: { primary_value: number; breakdowns: Breakdown[] }
   trend: Point[]
   meta: Record<string, unknown>
+  composition: { key: string; label: string; value: number; group: string }[]
   budget_forecast?: { placement: string; rule: string; total: string; months: Month[] }
 }
 type Comparison = { category_name: string; budget_amount: string | null; actual_amount: string; projected_amount: string }
@@ -171,6 +172,9 @@ test('F-002 budget-aware Cash Flow: REST, MCP, Budgets page and screen agree', a
   await screenshot(page, 'f002-3-panel')
   await panel.locator('xpath=following-sibling::*[1]').scrollIntoViewIfNeeded()
   await settle(page)
+  // The donut's outer ring splits the budget figure by category (Q8); the largest is Groceries.
+  expect(on.composition.filter((c) => c.group === 'budgetExpenses').map((c) => c.label)[0]).toBe('Groceries')
+  await expect(page.getByText('Groceries · budget').first()).toBeVisible()
   await screenshot(page, 'f002-3b-breakdown')
   await page.evaluate(() => window.scrollTo(0, 0))
 
