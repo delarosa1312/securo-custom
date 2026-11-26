@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Static checks with upstream's own commands. Prints one line per check and the output of failures only.
-# Usage: fork/tools/check.sh [backend|frontend]   (default: both)
+# Usage: fork/tools/check.sh [backend|frontend|migrations]   (default: backend and frontend)
+# migrations: only the two Alembic chain checks, no dependencies needed (the same two the upstream sync runs).
 set -u
 root="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
 what="${1:-all}"
@@ -19,9 +20,15 @@ run() {
 }
 
 case "$what" in
-  all | backend | frontend) ;;
-  *) echo "usage: check.sh [backend|frontend]" >&2; exit 2 ;;
+  all | backend | frontend | migrations) ;;
+  *) echo "usage: check.sh [backend|frontend|migrations]" >&2; exit 2 ;;
 esac
+
+if [[ $what == migrations ]]; then
+  run "migration chain (upstream line)" . python3 backend/scripts/check_migration_chain.py
+  run "migration chain (fork line)" . python3 fork/tools/check_fork_migrations.py
+  exit $fail
+fi
 
 if [[ $what == all || $what == backend ]]; then
   run "ruff" backend uv run --no-sync ruff check .
