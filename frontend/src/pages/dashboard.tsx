@@ -86,6 +86,7 @@ import { useLayout } from '@/hooks/use-layout'
 import { usePluginWidgets } from '@/hooks/use-plugin-reports'
 import { useEntryAvailability } from '@/hooks/use-entry-availability'
 import { useLibrary } from '@/contexts/library-context'
+import { isIncludedInAvailable } from '@/fork/available-balance/available-account'
 
 function formatDate(dateStr: string, locale = 'pt-BR') {
   return new Date(dateStr + 'T00:00:00').toLocaleDateString(locale)
@@ -652,7 +653,7 @@ export default function DashboardPage() {
   const availableBalanceAccounts = useMemo(() => {
     const all = accountsList ?? []
     const scoped = activeAccountIds ? all.filter((a) => activeAccountIds.includes(a.id)) : all
-    return scoped.filter((a) => a.type === 'checking' || a.type === 'savings' || a.type === 'wallet')
+    return scoped.filter((a) => (a.type === 'checking' || a.type === 'savings' || a.type === 'wallet') && isIncludedInAvailable(a))
   }, [accountsList, activeAccountIds])
   const availableBalanceFromAccounts = availableBalanceAccounts.reduce(
     (sum, a) => sum + Number(a.balance_primary ?? a.current_balance), 0,

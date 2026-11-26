@@ -20,6 +20,7 @@ import {
 } from '@/lib/api'
 
 import type { ProposalKind, ProposalData, TransferLeg } from '@/lib/agent-proposals'
+import { applySetAccountAvailable, setAccountAvailableSummary } from '@/fork/available-balance/proposal'
 
 interface Props {
   toolCallId: string
@@ -165,6 +166,7 @@ function kindTitle(kind: ProposalKind, t: ReturnType<typeof useTranslation>['t']
   if (kind === 'delete_rule') return t('rules.confirmDeleteTitle')
   if (kind === 'create_manual_account') return t('accounts.addManual')
   if (kind === 'update_manual_account') return t('accounts.editAccount')
+  if (kind === 'set_account_available') return t('fork.availableBalance.proposal.title')
   return t(`agents.proposal.kind.${kind}`)
 }
 
@@ -365,6 +367,8 @@ function renderSummary(
       return t('agents.proposal.summary.createCategoryGroup', {
         name: String(p.name ?? '?'),
       }) + (d.name_collision ? ` — ${t('agents.proposal.collision', { name: d.name_collision.name })}` : '')
+    case 'set_account_available': // fork F-001
+      return setAccountAvailableSummary(d, t)
     default:
       return ''
   }
@@ -651,5 +655,7 @@ async function applyProposal(data: ProposalData): Promise<string | void> {
       })
       return g.id
     }
+    case 'set_account_available': // fork F-001
+      return applySetAccountAvailable(data)
   }
 }
