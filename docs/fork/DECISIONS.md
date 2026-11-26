@@ -46,3 +46,12 @@ upstream.
 Dashing's coordinator and quality tools carry Dashing assumptions. This repository has four small scripts in
 `fork/tools/` and a written process (`PROCESS.md`); state lives in GitHub issues and the memory folder. No
 registry or orchestration framework until a concrete need shows up twice.
+
+## D-008 Fork fields on an upstream response only when a fork option is on (2026-11-26, #5)
+
+The budget-aware Cash Flow mode adds a trend figure, a summary figure and an explanation block to
+`GET /api/reports/cash-flow`. Adding optional fields to upstream's `ReportResponse` would put `null` keys in every
+response with the mode off. Instead the fork returns `CashFlowBudgetResponse`, a subclass of `ReportResponse`, only
+when `budget_forecast=true`, and the route's response model is the union of both; with the option off the body is
+upstream's byte for byte (tested). Query limits stay upstream's without the option (`months` 12, upstream's exact
+422), wider only with it (24). Later fork options on upstream reports (F-003, F-006) follow the same pattern.
