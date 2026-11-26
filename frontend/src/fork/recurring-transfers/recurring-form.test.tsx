@@ -7,6 +7,7 @@ import { currencies } from '@/lib/api'
 import { renderWithProviders, t } from '@/test/utils'
 import type { RecurringTransaction } from '@/types'
 import { TransferRoute } from './transfer-route'
+import { isProjectedTransferLeg } from './transfer'
 
 vi.mock('@/hooks/use-display-locale', () => ({
   useDateLocale: () => 'en-GB',
@@ -123,6 +124,24 @@ describe('RecurringForm as a transfer', () => {
     expect(toSelect()).toHaveValue('')
     await user.click(screen.getByRole('button', { name: t('common.save') }))
     expect(onSave).not.toHaveBeenCalled()
+  })
+})
+
+describe('RecurringForm with a closed account', () => {
+  it('keeps a closed destination so the transfer can still be stopped', async () => {
+    const { user, onSave } = renderForm(savingsPlan({ destination_account_id: 'acc-gone', destination_amount: '36.00' }))
+    expect(toSelect()).toHaveValue('acc-gone')
+    expect(within(toSelect()).getByRole('option', { name: t('fork.recurringTransfers.unavailableAccount') })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: t('common.save') }))
+    expect(onSave.mock.calls[0][0]).toMatchObject({ destination_account_id: 'acc-gone', destination_amount: 36 })
+  })
+})
+
+describe('isProjectedTransferLeg', () => {
+  it('tells a transfer leg from an upstream transfer-like row', () => {
+    expect(isProjectedTransferLeg({ category_treat_as_transfer: true, category_id: null })).toBe(true)
+    expect(isProjectedTransferLeg({ category_treat_as_transfer: true, category_id: 'cat-card-payment' })).toBe(false)
+    expect(isProjectedTransferLeg({ category_treat_as_transfer: false, category_id: null })).toBe(false)
   })
 })
 

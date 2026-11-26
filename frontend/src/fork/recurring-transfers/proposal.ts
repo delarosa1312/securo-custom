@@ -50,9 +50,15 @@ export function recurringTransferSummary(
   }
   if (kind === 'update_recurring_transfer') {
     const changes = (data.changes || {}) as Fields
+    const accountLabel: Fields = {
+      from_account_name: t('fork.recurringTransfers.fromAccount'),
+      to_account_name: t('fork.recurringTransfers.toAccount'),
+    }
     const lines = Object.entries(changes)
       .filter(([key]) => !key.endsWith('_account_id'))
-      .map(([key, value]) => `${key}: ${String(target[key] ?? '∅')} → ${String(value ?? '∅')}`)
+      .map(([key, value]) => accountLabel[key]
+        ? `${String(accountLabel[key])}: ${String(value ?? '?')}`
+        : `${key}: ${String(target[key] ?? '∅')} → ${String(value ?? '∅')}`)
     return t('fork.recurringTransfers.proposal.update', {
       description: String(target.description ?? '?'),
       changes: lines.join(', ') || '?',

@@ -645,6 +645,10 @@ function RecurringFormFields({
   const showReceived = isTransfer && needsReceivedAmount(
     sourceAccount, sortedAccounts.find((account) => account.id === destinationId),
   )
+  // A closed destination is not in the list: its amount received stays as it was.
+  const keptReceived = !sortedAccounts.some((account) => account.id === destinationId) && recurring?.destination_amount != null
+    ? Number(recurring.destination_amount)
+    : null
   // A transfer moves money in its source account's currency.
   const effectiveCurrency = isTransfer ? sourceAccount?.currency ?? currency : currency
   const [isActive, setIsActive] = useState(recurring?.is_active ?? initial?.is_active ?? true)
@@ -707,7 +711,7 @@ function RecurringFormFields({
             : hadInitialLines
               ? { category_lines: { share_type: 'exact', lines: [] } }
               : {}),
-          ...transferPayload(type, wasTransfer, destinationId, showReceived ? parsedReceived : null),
+          ...transferPayload(type, wasTransfer, destinationId, showReceived ? parsedReceived : keptReceived),
         } as Partial<RecurringTransaction>)
       }}
       className="space-y-4"

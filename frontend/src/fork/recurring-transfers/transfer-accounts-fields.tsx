@@ -33,6 +33,10 @@ export function TransferAccountsFields({
   const source = accounts.find((account) => account.id === sourceId)
   const destination = accounts.find((account) => account.id === destinationId)
   const options = destinationOptions(accounts, sourceId)
+  // A closed account is not in the list; the schedule keeps it, so it can still be deactivated or end-dated.
+  const sourceMissing = !!sourceId && !source
+  const destinationMissing =
+    !!destinationId && destinationId !== sourceId && !options.some((account) => account.id === destinationId)
   return (
     <>
       <div className="grid grid-cols-2 gap-4">
@@ -46,6 +50,7 @@ export function TransferAccountsFields({
             required
           >
             {!sourceId && <option value="" disabled hidden>{t('fork.recurringTransfers.selectAccount')}</option>}
+            {sourceMissing && <option value={sourceId}>{t('fork.recurringTransfers.unavailableAccount')}</option>}
             {accounts.filter((account) => !account.is_closed || account.id === sourceId).map((account) => (
               <option key={account.id} value={account.id}>{getAccountName(account)}</option>
             ))}
@@ -56,11 +61,16 @@ export function TransferAccountsFields({
           <select
             id="recurring-transfer-to"
             className={selectClass}
-            value={options.some((account) => account.id === destinationId) ? destinationId : ''}
+            value={destinationId && destinationId !== sourceId ? destinationId : ''}
             onChange={(e) => onDestinationChange(e.target.value)}
             required
           >
             <option value="" disabled hidden>{t('fork.recurringTransfers.selectAccount')}</option>
+            {destinationMissing && (
+              <option value={destinationId}>
+                {destination ? getAccountName(destination) : t('fork.recurringTransfers.unavailableAccount')}
+              </option>
+            )}
             {options.map((account) => (
               <option key={account.id} value={account.id}>{getAccountName(account)}</option>
             ))}

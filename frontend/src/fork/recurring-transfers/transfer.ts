@@ -44,3 +44,15 @@ export function transferPayload(
   }
   return wasTransfer ? { destination_account_id: null } : {}
 }
+
+/**
+ * A projected row that is one leg of a recurring transfer. The server marks legs as transfers and gives them
+ * no category; an upstream row marked as a transfer always has its transfer-like category.
+ */
+export function isProjectedTransferLeg(row: {
+  category_treat_as_transfer?: boolean
+  category_id?: string | null
+  has_category_lines?: boolean
+}): boolean {
+  return !!row.category_treat_as_transfer && row.category_id == null && !row.has_category_lines
+}

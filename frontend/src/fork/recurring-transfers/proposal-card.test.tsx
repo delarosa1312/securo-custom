@@ -64,7 +64,7 @@ describe('recurring transfer proposals', () => {
         }}
       />,
     )
-    expect(screen.getByText(/Savings plan: amount: 200 → 250/)).toBeInTheDocument()
+    expect(screen.getByText(/Savings plan: amount: 200 → 250, To account: Broker/)).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: /Apply/ }))
     await waitFor(() => expect(updateRecurring).toHaveBeenCalledWith('rec-plan', {
       amount: 250, destination_account_id: 'acc-broker', destination_amount: 45,

@@ -35,6 +35,7 @@
     "fromAccount": "Conta de origem",
     "toAccount": "Conta de destino",
     "selectAccount": "Selecione uma conta",
+    "unavailableAccount": "Conta encerrada ou indisponível",
     "amountReceived": "Valor recebido ({{currency}})",
     "amountReceivedHint": "As contas usam moedas diferentes: este é o valor que chega em {{name}} a cada vez.",
     "route": "{{from}} para {{to}}",

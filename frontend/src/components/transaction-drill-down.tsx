@@ -1,4 +1,5 @@
 import { useEffect, useRef, useMemo, useState } from 'react'
+import { isProjectedTransferLeg } from '@/fork/recurring-transfers/transfer'
 import { useTranslation } from 'react-i18next'
 import { useDisplayLocale, useDateLocale } from '@/hooks/use-display-locale'
 import { useQuery } from '@tanstack/react-query'
@@ -238,6 +239,8 @@ export function TransactionDrillDown({
 
     // A disabled query can still hand back what the dashboard cached.
     for (const pt of filter?.realizedOnly ? [] : projectedTxs ?? []) {
+      // Like the posted rows (user_pnl_only), a recurring transfer is neither income nor expense.
+      if (isProjectedTransferLeg(pt)) continue // fork F-004
       // Filter projected txs by drill-down criteria
       if (filter?.account_id && pt.account_id !== filter.account_id) continue
       if (filter?.account_ids && (!pt.account_id || !filter.account_ids.includes(pt.account_id))) continue

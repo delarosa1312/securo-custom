@@ -19,7 +19,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.fork.available_balance import counts_as_available
 from app.models.account import Account
-from app.models.bank_connection import BankConnection
 from app.models.recurring_transaction import RecurringTransaction
 
 CROSS_CURRENCY_NEEDS_AMOUNT = (
@@ -34,6 +33,12 @@ CLOSED_ACCOUNT = "Transfers cannot use a closed account"
 NO_SOURCE_TRANSACTION = "A transfer schedule cannot be made from an existing transaction"
 NO_DESTINATION_AMOUNT_WITHOUT_DESTINATION = (
     "destination_amount needs destination_account_id (a transfer schedule)"
+)
+POSITIVE_AMOUNT = "A transfer's amount must be greater than zero"
+
+# What makes a schedule a valid transfer; an edit touching none of these is not judged again.
+_TRANSFER_FIELDS = (
+    "account_id", "destination_account_id", "destination_amount", "currency", "type", "category_id",
 )
 
 
@@ -57,23 +62,20 @@ def touches_accounts(account_ids: Iterable[uuid.UUID]):
 async def _workspace_account(
     session: AsyncSession, workspace_id: uuid.UUID, account_id: uuid.UUID, missing: str
 ) -> Account:
-    """The account, reachable from the workspace as upstream's `create_transfer` checks it."""
+    """The account, in the workspace itself: generation moves only such accounts (`usable`)."""
     account = (
         await session.execute(
-            select(Account)
-            .outerjoin(BankConnection)
-            .where(
-                Account.id == account_id,
-                or_(
-                    Account.workspace_id == workspace_id,
-                    BankConnection.workspace_id == workspace_id,
-                ),
-            )
+            select(Account).where(Account.id == account_id, Account.workspace_id == workspace_id)
         )
     ).scalar_one_or_none()
     if account is None:
         raise ValueError(missing)
     return account
+
+
+def _check_amount(amount: Any) -> None:
+    if amount is None or amount <= 0:
+        raise ValueError(POSITIVE_AMOUNT)
 
 
 async def _check(
@@ -119,6 +121,7 @@ async def check_create(session: AsyncSession, workspace_id: uuid.UUID, data: Any
         return
     if data.source_transaction_id is not None:
         raise ValueError(NO_SOURCE_TRANSACTION)
+    _check_amount(data.amount)
     await _check(
         session,
         workspace_id,
@@ -142,10 +145,16 @@ async def check_update(
     """Refuse an edit that leaves an invalid transfer schedule.
 
     The schedule is judged as it will be after the edit. Removing the destination (an explicit
-    null) turns it back into a plain schedule and clears its destination amount.
+    null) turns it back into a plain schedule and clears its destination amount. An edit that
+    leaves the transfer fields alone (deactivating, an end date, a new description or amount)
+    is not judged again, so it works after one of its accounts was closed.
     """
     if "destination_account_id" in update_data and update_data["destination_account_id"] is None:
         update_data["destination_amount"] = None
+    becomes_transfer = update_data.get("destination_account_id", recurring.destination_account_id)
+    if becomes_transfer is not None and lines_payload is not None and not lines_payload.lines:
+        # Upstream's undone split keeps its largest part's category; a transfer keeps none.
+        update_data["category_id"] = None
     after = {
         key: update_data.get(key, getattr(recurring, key))
         for key in (
@@ -157,10 +166,16 @@ async def check_update(
         if after["destination_amount"] is not None:
             raise ValueError(NO_DESTINATION_AMOUNT_WITHOUT_DESTINATION)
         return
+    if "amount" in update_data:
+        _check_amount(update_data["amount"])
     if lines_payload is not None:
         has_lines = bool(lines_payload.lines)
     else:
         has_lines = bool(recurring.has_category_lines)
+    if is_transfer_schedule(recurring) and not has_lines and not any(
+        key in update_data and update_data[key] != getattr(recurring, key) for key in _TRANSFER_FIELDS
+    ):
+        return
     await _check(
         session,
         workspace_id,

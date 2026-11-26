@@ -117,4 +117,12 @@ Projections expand a transfer schedule into two leg proxies in fork code, and vi
 expense drop them. Upstream's on-demand FX sync commits the session, so it runs before the pair's savepoint and
 the legs are stamped from stored rates only: the pair stays one unit. That commit releases the schedule lock
 early; the unique claim still keeps the occurrence single. Bank rows never match a transfer schedule or leg: on a
-bank-connected account the generated pending leg stays beside the bank's own row until the user resolves it.
+bank-connected account the generated pending leg stays beside the bank's own row, and on a manual account a
+statement import lands beside the posted leg, as an unpaired debit, until the user resolves it (deleting a leg
+deletes both legs of the pair). Upstream does upgrade an ordinary generated placeholder in place; letting it do so
+for a transfer leg could rewrite one leg's amount under a tolerance and leave the pair unequal, so no matching was
+added here (coordinator, 2026-11-26).
+
+An edit that leaves a transfer's fields alone (deactivating, an end date, a new description or amount) is not
+judged again, so a schedule whose account was closed can still be stopped; changing an account or the amount
+received is judged in full and refused while an account is closed.

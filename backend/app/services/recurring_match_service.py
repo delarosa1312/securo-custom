@@ -354,7 +354,7 @@ async def find_placeholder_for_incoming(
             Transaction.account_id == account_id,
             Transaction.source == "recurring",
             Transaction.recurring_transaction_id.is_not(None),
-            Transaction.transfer_pair_id.is_(None),  # fork F-004: never merge into a transfer leg
+            RecurringTransaction.destination_account_id.is_(None),  # fork F-004: never into a transfer leg
             Transaction.external_id.is_(None),
             Transaction.currency == currency,
             Transaction.type == tx_type,
@@ -415,7 +415,7 @@ async def find_placeholder_for_incoming(
             Transaction.account_id == account_id,
             Transaction.source == "recurring",
             Transaction.recurring_transaction_id.is_not(None),
-            Transaction.transfer_pair_id.is_(None),  # fork F-004: never merge into a transfer leg
+            RecurringTransaction.destination_account_id.is_(None),  # fork F-004: never into a transfer leg
             Transaction.external_id.is_(None),
             Transaction.currency != currency,
             Transaction.type == tx_type,

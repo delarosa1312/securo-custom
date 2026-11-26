@@ -35,6 +35,7 @@
     "fromAccount": "From account",
     "toAccount": "To account",
     "selectAccount": "Select an account",
+    "unavailableAccount": "Closed or unavailable account",
     "amountReceived": "Amount received ({{currency}})",
     "amountReceivedHint": "The accounts use different currencies: this is what arrives in {{name}} each time.",
     "route": "{{from}} to {{to}}",

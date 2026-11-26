@@ -71,7 +71,10 @@ a transfer crossing the available boundary counts: into a switched-off account i
 one it arrives. Both accounts must be open and in the workspace; a closed or moved account makes the occurrence
 wait. Between currencies the schedule needs the amount received each time (`destination_amount`); no rate is
 applied. Editing, deactivating, end dates and deleting work as for any schedule and never change transfers
-already generated. Example: 200 from Checking (1,000) to Savings (1,000) on the 10th of every month: on the 10th
+already generated; a transfer whose account was closed can still be deactivated, end-dated or deleted. Known
+limits: a bank or statement row for the same move is not matched to a generated leg, so it shows beside it until
+the user deletes one; the dashboard balance chart moves with transfer schedules once F-006 (#8) lands. Example:
+200 from Checking (1,000) to Savings (1,000) on the 10th of every month: on the 10th
 Checking 800, Savings 1,200, total balance 2,000, monthly income and expenses unchanged.
 
 Transfers already scheduled one by one are converted only on request, one series at a time.

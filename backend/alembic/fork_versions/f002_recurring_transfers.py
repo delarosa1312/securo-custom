@@ -76,9 +76,14 @@ def upgrade() -> None:
     op.create_index(
         "ix_recurring_occurrences_workspace_id", "recurring_occurrences", ["workspace_id"]
     )
+    # Deleting transactions sets transaction_id to null here; the index keeps that from scanning.
+    op.create_index(
+        "ix_recurring_occurrences_transaction_id", "recurring_occurrences", ["transaction_id"]
+    )
 
 
 def downgrade() -> None:
+    op.drop_index("ix_recurring_occurrences_transaction_id", table_name="recurring_occurrences")
     op.drop_index("ix_recurring_occurrences_workspace_id", table_name="recurring_occurrences")
     op.drop_table("recurring_occurrences")
     op.drop_constraint(
