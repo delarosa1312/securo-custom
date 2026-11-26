@@ -402,7 +402,10 @@ export default function ReportsPage() {
           : t(`reports.${RANGE_LABELS[selectedRange.key]}`)
 
   const handleSelectTab = (key: string) => {
-    const nextTab = allTabs.find((tab) => tab.key === key) ?? REPORT_TABS[0]
+    const foundTab = allTabs.find((tab) => tab.key === key) ?? REPORT_TABS[0]
+    const nextTab = foundTab.key === 'cash_flow' && cashFlowBudgets
+      ? { ...foundTab, rangeOptions: [...foundTab.rangeOptions, BUDGET_RANGE_OPTION] }
+      : foundTab
     setActiveTab(key)
     setCompositionView(key === 'net_worth' ? 'netWorth' : 'net')
     setSparklinePage(0)
@@ -528,9 +531,11 @@ export default function ReportsPage() {
   // Cash-flow columns are drawn as ranges ending at net flow; see cashFlowBar.
   type BarChartDatum = Record<string, string | number | null | [number, number]> & { date: string }
   const budgetForecast = meta?.type === 'cash_flow' ? (data as CashFlowBudgetResponse | undefined)?.budget_forecast : undefined
+  // Only a subtracted budget is part of each period's net flow; a filtered view shows it apart (Q5).
+  const budgetSubtracted = budgetForecast?.placement === 'subtracted'
   const barChartData: BarChartDatum[] = chartData.map((point): BarChartDatum =>
     meta?.type === 'cash_flow'
-      ? { ...point, ...(budgetForecast ? budgetCashFlowBar(point.inflow, point.outflow, point.budget_outflow) : cashFlowBar(point.inflow, point.outflow)) }
+      ? { ...point, ...(budgetSubtracted ? budgetCashFlowBar(point.inflow, point.outflow, point.budget_outflow) : cashFlowBar(point.inflow, point.outflow)) }
       : point,
   )
   const netWorthDomain = getNetWorthDomain(
@@ -1913,7 +1918,7 @@ export default function ReportsPage() {
                       // cash flow at all, gets no tooltip.
                       if (items.length === 0) return null
                       const hovered = items[0].payload as BarChartDatum
-                      const cashFlowTip = meta.type === 'cash_flow' ? cashFlowTooltip(hovered, !!budgetForecast) : null
+                      const cashFlowTip = meta.type === 'cash_flow' ? cashFlowTooltip(hovered, budgetSubtracted) : null
                       const cashFlowPoint = cashFlowTip ? cashFlowTip.bar : null
                       const netFlowColor = !cashFlowPoint || cashFlowPoint.netFlow === 0
                         ? 'var(--muted-foreground)'
@@ -1964,7 +1969,7 @@ export default function ReportsPage() {
                       ? [
                           { key: 'inflow', color: 'var(--chart-income)' },
                           { key: 'outflow', color: 'var(--chart-expense)' },
-                          ...(budgetForecast ? [{ key: 'budget_outflow', color: BUDGET_COLOR }] : []),
+                          ...(budgetSubtracted ? [{ key: 'budget_outflow', color: BUDGET_COLOR }] : []),
                         ]
                       : meta.series_keys.map((k) => ({ key: k, color: colorMap[k] || 'var(--chart-1)' }))
                     const filteredSeries = allSeries.filter(({ key }) =>

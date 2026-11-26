@@ -14,3 +14,10 @@ BUDGET_FORECAST_PARAMETER: dict[str, Any] = {
         "and category (budget, posted, scheduled, remaining, forecast). Nothing is written."
     ),
 }
+
+
+def budget_forecast_on(value: Any) -> bool:
+    """Tool arguments are not validated against the schema, so a client may send "false" as a string."""
+    if isinstance(value, str):
+        return value.strip().lower() == "true"
+    return value is True

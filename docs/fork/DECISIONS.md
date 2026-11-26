@@ -83,3 +83,6 @@ response with the mode off. Instead the fork returns `CashFlowBudgetResponse`, a
 when `budget_forecast=true`, and the route's response model is the union of both; with the option off the body is
 upstream's byte for byte (tested). Query limits stay upstream's without the option (`months` 12, upstream's exact
 422), wider only with it (24). Later fork options on upstream reports (F-003, F-006) follow the same pattern.
+Known edges: the route's OpenAPI advertises `months` up to 24 and a union response for every caller, and when
+`months` is out of range together with another invalid parameter the 422 lists only the other one (upstream lists
+both); a request with only `months` out of range gets upstream's exact body.

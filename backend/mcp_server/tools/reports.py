@@ -9,7 +9,7 @@ from app.services import dashboard_service, report_service
 from mcp_server.auth import CallContext
 from mcp_server.registry import tool
 from mcp_server.tools._helpers import parse_date, resolve_workspace_id
-from mcp_server.tools.fork_budget_forecast import BUDGET_FORECAST_PARAMETER
+from mcp_server.tools.fork_budget_forecast import BUDGET_FORECAST_PARAMETER, budget_forecast_on
 
 
 def _pri_currency(ctx: CallContext) -> str:
@@ -103,7 +103,7 @@ async def get_cash_flow(
     ws_id = await resolve_workspace_id(session, ctx)
     rep = await report_service.get_cash_flow_report(
         session, ws_id, ctx.user_id, months=int(months), interval=interval, currency=_pri_currency(ctx),
-        budget_forecast=bool(budget_forecast),
+        budget_forecast=budget_forecast_on(budget_forecast),
     )
     return _serialize_report(rep)
 

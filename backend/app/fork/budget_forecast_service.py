@@ -125,7 +125,9 @@ def attach_budget_forecast(
     """Add the per-point figure, the summary figure and the explanation.
 
     The balance itself is already right: when the placement is ``subtracted``
-    the report walked the daily amounts into its balance flows.
+    the report walked the daily amounts into its balance flows. A filtered view
+    gets no per-point figure: a point's flows net to the filtered balance's
+    move, and the budget is not part of it (Q5).
     """
     from app.services.report_service import _format_date_label
 
@@ -136,11 +138,13 @@ def attach_budget_forecast(
         label = _format_date_label(day, interval)
         by_label[label] = by_label.get(label, ZERO) + amount
 
-    trend = []
-    for point in response.trend:
-        breakdowns = dict(point.breakdowns)
-        breakdowns[BUDGET_OUTFLOW_KEY] = round(float(by_label.get(point.date, ZERO)), 2)
-        trend.append(point.model_copy(update={"breakdowns": breakdowns}))
+    trend = list(response.trend)
+    if subtracted:
+        trend = []
+        for point in response.trend:
+            breakdowns = dict(point.breakdowns)
+            breakdowns[BUDGET_OUTFLOW_KEY] = round(float(by_label.get(point.date, ZERO)), 2)
+            trend.append(point.model_copy(update={"breakdowns": breakdowns}))
 
     key, label = _BREAKDOWN[placement]
     breakdowns = list(response.summary.breakdowns)

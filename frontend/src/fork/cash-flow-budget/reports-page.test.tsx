@@ -136,4 +136,16 @@ describe('Cash Flow: Include budgets (F-002)', () => {
     expect(screen.queryByRole('button', { name: t('reports.range24m') })).toBeNull()
     await waitFor(() => expect(api.reports.cashFlow).toHaveBeenLastCalledWith(12, 'monthly', true, undefined))
   })
+
+  it('keeps 24 months when leaving the tab and coming back with budgets on', async () => {
+    const { user } = await openCashFlow()
+    await user.click(budgetsButton())
+    await user.click(await screen.findByRole('button', { name: t('reports.range24m') }))
+    await waitFor(() => expect(fork.cashFlowWithBudgets).toHaveBeenLastCalledWith(24, 'monthly', undefined))
+
+    await user.click(screen.getByRole('button', { name: t('reports.netWorth') }))
+    await user.click(screen.getByRole('button', { name: t('reports.cashFlow') }))
+    expect(screen.getByRole('button', { name: t('reports.range24m') })).toBeInTheDocument()
+    await waitFor(() => expect(fork.cashFlowWithBudgets).toHaveBeenLastCalledWith(24, 'monthly', undefined))
+  })
 })

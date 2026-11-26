@@ -9,7 +9,6 @@ import pytest
 from sqlalchemy import delete, select
 
 from app.fork.budget_forecast_schemas import CashFlowBudgetResponse
-from app.models.account import Account
 from app.models.budget import Budget
 from app.models.category import Category
 from app.schemas.report import ReportResponse
@@ -155,7 +154,8 @@ async def test_filtered_view_reports_unallocated_and_leaves_the_balance(session,
     assert _breakdown(on, "unallocatedBudget") == 960.0
     assert _breakdown(on, "budgetExpenses") is None
     assert _breakdown(on, "endingBalance") == _breakdown(off, "endingBalance")
-    assert _point(on, "2026-11-21").breakdowns["budget_outflow"] == 11.0
+    # Not in the points either: their flows net to the filtered balance's move.
+    assert [p.breakdowns for p in on.trend] == [p.breakdowns for p in off.trend]
     # An empty filter (a collection with no bank account) behaves the same way.
     empty = await _report(session, test_workspace, test_user, account_ids=[], budget_forecast=True)
     assert empty.budget_forecast.placement == "unallocated"
@@ -174,6 +174,10 @@ async def test_weekly_and_monthly_views_are_sums_of_the_days(session, test_user,
     assert round(sum(p.breakdowns["budget_outflow"] for p in weekly.trend), 2) == 960.0
     # ISO week 48 of 2026 runs 23 to 29 November: 7 days at 11.00.
     assert _point(weekly, "2026-W48").breakdowns["budget_outflow"] == 77.0
+    # Over six months the last partial week is an appended end point and still counts.
+    long_weekly = await _report(session, test_workspace, test_user, months=6, interval="weekly", budget_forecast=True)
+    long_total = sum((Decimal(str(p.breakdowns["budget_outflow"])) for p in long_weekly.trend), Decimal("0"))
+    assert long_total == long_weekly.budget_forecast.total
 
 
 @pytest.mark.asyncio
@@ -359,9 +363,57 @@ async def test_other_workspaces_budgets_are_ignored(session, test_user, test_wor
 
 
 @pytest.mark.asyncio
-async def test_closed_account_does_not_change_the_budget_layer(session, test_user, test_workspace, today):
+async def test_closing_an_account_does_not_change_the_budget_layer(session, test_user, test_workspace, today):
     await _worked_example(session, test_user, test_workspace)
-    closed: Account = await data.account(session, test_user, test_workspace, "Old", is_closed=True)
-    assert closed.is_closed
+    restaurants = (await session.execute(select(Category).where(Category.name == "Restaurants"))).scalar_one()
+    old = await data.account(session, test_user, test_workspace, "Old card")
+    await data.txn(session, test_user, test_workspace, old, "30", date(2026, 11, 12), cat=restaurants)
+    before = await _report(session, test_workspace, test_user, budget_forecast=True)
+    old.is_closed = True
+    await session.commit()
+    after = await _report(session, test_workspace, test_user, budget_forecast=True)
+
+    # Spending posted on it still used the budget, as on the Budgets page.
+    assert _category(before, "2026-11", "Restaurants").posted == Decimal("130.00")
+    assert after.budget_forecast == before.budget_forecast
+
+
+@pytest.mark.asyncio
+async def test_scheduled_refund_does_not_free_budget_until_posted(session, test_user, test_workspace, today):
+    """Known limit (guide): budgets count scheduled debits only, so a pending refund frees budget
+    when it posts, and the end balance drops by that amount at that moment."""
+    acct, restaurants, *_ = await _worked_example(session, test_user, test_workspace)
+    await data.txn(session, test_user, test_workspace, acct, "20", date(2026, 11, 25), "credit", cat=restaurants,
+                   status="pending")
     report = await _report(session, test_workspace, test_user, budget_forecast=True)
+
+    nov = _category(report, "2026-11", "Restaurants")
+    assert (nov.posted, nov.scheduled, nov.remaining) == (Decimal("100.00"), Decimal("40.00"), Decimal("110.00"))
+
+
+@pytest.mark.asyncio
+async def test_paired_transfer_in_a_budgeted_category_is_not_spending(session, test_user, test_workspace, today):
+    acct, restaurants, *_ = await _worked_example(session, test_user, test_workspace)
+    savings = await data.account(session, test_user, test_workspace, "Savings", acct_type="savings")
+    out_leg = await data.txn(session, test_user, test_workspace, acct, "70", date(2026, 11, 14), cat=restaurants)
+    in_leg = await data.txn(session, test_user, test_workspace, savings, "70", date(2026, 11, 14), "credit")
+    out_leg.transfer_pair_id, in_leg.transfer_pair_id = in_leg.id, out_leg.id
+    await session.commit()
+    report = await _report(session, test_workspace, test_user, budget_forecast=True)
+
+    assert _category(report, "2026-11", "Restaurants").posted == Decimal("100.00")
     assert report.budget_forecast.total == Decimal("960.00")
+
+
+@pytest.mark.asyncio
+async def test_future_dated_posted_installment_counts_once(session, test_user, test_workspace, today):
+    acct, restaurants, *_ = await _worked_example(session, test_user, test_workspace)
+    await data.txn(session, test_user, test_workspace, acct, "50", date(2026, 12, 5), cat=restaurants)
+    off = await _report(session, test_workspace, test_user)
+    on = await _report(session, test_workspace, test_user, budget_forecast=True)
+
+    dec = _category(on, "2026-12", "Restaurants")
+    assert (dec.scheduled, dec.remaining) == (Decimal("50.00"), Decimal("200.00"))
+    assert _category(on, "2026-11", "Restaurants").remaining == Decimal("110.00")
+    # The walk applies the 50 once (it is in both reports) and the budget adds only the rest.
+    assert round(_breakdown(off, "endingBalance") - _breakdown(on, "endingBalance"), 2) == 910.0

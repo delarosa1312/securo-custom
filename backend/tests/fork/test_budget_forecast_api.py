@@ -159,3 +159,12 @@ async def test_months_refusals_without_the_mode_match_upstream(client, auth_head
     assert expected.status_code == 422
     assert actual.status_code == 422
     assert actual.content == expected.content
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("value, on", [(True, True), ("true", True), (False, False), ("false", False), ("0", False), (None, False)])
+async def test_mcp_reads_the_flag_strictly(session, test_user, test_workspace, today, value, on):
+    await _seed(session, test_user, test_workspace)
+    ctx = CallContext(user_id=test_user.id, workspace_id=test_workspace.id)
+    body = await mcp_get_cash_flow(session=session, ctx=ctx, months=1, budget_forecast=value)
+    assert ("budget_forecast" in body) is on

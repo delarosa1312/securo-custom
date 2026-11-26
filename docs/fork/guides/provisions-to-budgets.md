@@ -76,9 +76,10 @@ curl -s -H "Authorization: Bearer $TOKEN" -H "X-Workspace-Id: $WORKSPACE" \
   "$SECURO/api/reports/cash-flow?months=12&interval=monthly&budget_forecast=true"
 ```
 
-An access token needs `reports:read` and, for the second call, `budgets:read`. The response adds
-`budget_outflow` to each trend point, a `budgetExpenses` (or `unallocatedBudget`) summary figure and a
-`budget_forecast` block with the per month and category explanation. Over MCP, `get_cash_flow` takes
+An access token needs `reports:read` and, for the second call, `budgets:read`. The response adds a
+`budgetExpenses` summary figure, `budget_outflow` on each trend point and a `budget_forecast` block with the per
+month and category explanation. With `account_ids` the figure is `unallocatedBudget` and the points are left as
+they are, since the budget is not part of those accounts' flows. Over MCP, `get_cash_flow` takes
 `budget_forecast: true` and returns the same body.
 
 ## Known limits
@@ -88,5 +89,8 @@ An access token needs `reports:read` and, for the second call, `budgets:read`. T
   Generate or post it to fix the forecast. Issue #8 works on these differences.
 - In accrual mode the Cash Flow places recurring card purchases on their purchase date while budgets count them
   in the bill's month; at the last month of the horizon this can count one card cycle of those schedules twice.
+- A scheduled refund (a pending or recurring credit) in a budgeted category does not free budget until it posts:
+  budgets count scheduled debits only. While it is pending the forecast counts the refund as income and the
+  budget as still to be spent, so the projected end balance drops by the refund's amount on the day it posts.
 - Spending you share with someone in a group counts at your share, as on the Budgets page, while the account
   still moves by the full amount you paid.
