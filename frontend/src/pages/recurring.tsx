@@ -9,7 +9,6 @@ import { localDateString } from '@/lib/date-utils'
 import { invalidateFinancialQueries } from '@/lib/invalidate-queries'
 import { toast } from 'sonner'
 import { Button } from '@/components/ui/button'
-import { DeleteConfirmationDialog } from '@/components/delete-confirmation-dialog'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import {
@@ -41,7 +40,7 @@ import {
   type CategoryLineRow,
 } from '@/lib/category-lines'
 import { formatAmountInput, ltrAmount, parseAmountInput } from '@/lib/format'
-import { Pencil, Trash2, Plus, RefreshCw, Info, History, TrendingUp, TrendingDown } from 'lucide-react'
+import { Plus, RefreshCw, Info, History, TrendingUp, TrendingDown } from 'lucide-react'
 import { cn } from '@/lib/utils'
 import { PageHeader } from '@/components/page-header'
 import { RecurringMonthSummary } from '@/components/recurring-month-summary'
@@ -54,6 +53,12 @@ import { formatCurrency } from '@/lib/format'
 import { TRANSFER_TYPE, isTransferSchedule, needsReceivedAmount, transferPayload, type ScheduleKind } from '@/fork/recurring-transfers/transfer'
 import { TransferAccountsFields } from '@/fork/recurring-transfers/transfer-accounts-fields'
 import { TransferRoute } from '@/fork/recurring-transfers/transfer-route'
+// fork F-005: status tabs, row menu, occurrences, overdue list and the series dialogs
+import { RowMenu, SeriesSince, StatusTabs } from '@/fork/recurring-lifecycle/list-parts'
+import { useRecurringTabs } from '@/fork/recurring-lifecycle/tabs'
+import { useLifecycleActions } from '@/fork/recurring-lifecycle/lifecycle-actions'
+import { OverdueSection } from '@/fork/recurring-lifecycle/overdue-section'
+import type { LifecycleRecurring } from '@/fork/recurring-lifecycle/edit-scope'
 
 const TH = 'text-xs font-medium text-muted-foreground py-3'
 
@@ -162,12 +167,19 @@ function RecurringTab() {
   const queryClient = useQueryClient()
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editing, setEditing] = useState<RecurringTransaction | null>(null)
-  const [deletingRecurring, setDeletingRecurring] = useState<RecurringTransaction | null>(null)
   const [historySeries, setHistorySeries] = useState<RecurringTransaction | null>(null)
 
   const { data: recurringList, isError: recurringListFailed } = useQuery({
     queryKey: ['recurring'],
     queryFn: recurringApi.list,
+  })
+  // Fork F-005: Active | Inactive | Deleted (Q15); the table shows the chosen tab.
+  const { rows: shownRecurring, all: allRecurring, tab, setTab, counts } = useRecurringTabs(recurringList)
+  const lifecycle = useLifecycleActions({
+    canWrite,
+    onEdit: (rt) => { setEditing(rt); setDialogOpen(true) },
+    onPriceHistory: setHistorySeries,
+    onEditDone: () => { setDialogOpen(false); setEditing(null) },
   })
 
   const { data: recentChanges, isPending: recentChangesPending, isError: recentChangesFailed } =
@@ -232,19 +244,6 @@ function RecurringTab() {
     onError: (err: unknown, data) => toast.error(isTransferSchedule(data) ? extractApiError(err, t('common.error')) : t('common.error')),
   })
 
-  const deleteMutation = useMutation({
-    mutationFn: (id: string) => recurringApi.delete(id),
-    onSuccess: () => {
-      invalidateFinancialQueries(queryClient)
-      queryClient.invalidateQueries({ queryKey: ['recurring'] })
-      setDeletingRecurring(null)
-      toast.success(t('recurring.deleted'))
-    },
-    onError: (err: unknown) => {
-      toast.error(extractApiError(err, t('common.error')))
-    },
-  })
-
   const generateMutation = useMutation({
     mutationFn: () => recurringApi.generate(),
     onSuccess: (data) => {
@@ -300,8 +299,10 @@ function RecurringTab() {
             ) : undefined
           }
         />
-        {recurringList && recurringList.length > 0 && <RecurringMonthSummary />}
-        {recurringList && recurringList.length > 0 ? (
+        {allRecurring.length > 0 && <RecurringMonthSummary />}
+        <OverdueSection schedules={allRecurring} canWrite={canWrite} />
+        {allRecurring.length > 0 && <StatusTabs tab={tab} counts={counts} onChange={setTab} />}
+        {shownRecurring.length > 0 ? (
           <table className="w-full">
             <thead>
               <tr className="border-b border-border">
@@ -313,11 +314,13 @@ function RecurringTab() {
                 <th className={`${TH} text-end w-12`}>
                   <span className="sr-only">{t('recurring.viewPriceHistory')}</span>
                 </th>
-                {canWrite && <th className={`${TH} pe-4 sm:pe-5 text-end w-24`}>{t('recurring.actions')}</th>}
+                <th className={`${TH} pe-4 sm:pe-5 text-end w-12`}>
+                  <span className="sr-only">{t('recurring.actions')}</span>
+                </th>
               </tr>
             </thead>
             <tbody>
-              {recurringList.map((rt) => (
+              {shownRecurring.map((rt) => (
                 <tr key={rt.id} className="border-b border-border last:border-0 hover:bg-muted transition-colors">
                   <td className="py-3 ps-4 sm:ps-5 text-sm font-medium text-foreground">
                     <span className="inline-flex flex-wrap items-center gap-2">
@@ -325,6 +328,7 @@ function RecurringTab() {
                       {isSplitByCategory(rt) && <CategorySplitBadge tx={rt} />}
                     </span>
                     {isTransferSchedule(rt) && <TransferRoute schedule={rt} accounts={accountsList ?? []} />}
+                    <SeriesSince rt={rt} all={allRecurring} />
                   </td>
                   <td className={`py-3 text-xs sm:text-sm font-bold tabular-nums ${isTransferSchedule(rt) ? 'text-foreground' : rt.type === 'credit' ? 'text-emerald-600' : 'text-rose-500'}`}>
                     {mask(ltrAmount(`${isTransferSchedule(rt) ? '' : rt.type === 'credit' ? '+' : '−'}${formatCurrency(rt.amount, rt.currency, locale)}`))}
@@ -352,7 +356,9 @@ function RecurringTab() {
                         ? 'bg-emerald-50 text-emerald-600 border-emerald-100'
                         : 'bg-muted text-muted-foreground border-border'
                     )}>
-                      {rt.is_active ? t('recurring.active') : t('recurring.inactive')}
+                      {rt.deleted_at
+                        ? t('fork.recurringLifecycle.deletedOn', { date: new Date(rt.deleted_at).toLocaleDateString(dateLocale) })
+                        : rt.is_active ? t('recurring.active') : t('recurring.inactive')}
                     </span>
                   </td>
                   {/* Price history is reachable for every row, including
@@ -368,35 +374,18 @@ function RecurringTab() {
                       <History size={13} />
                     </button>
                   </td>
-                  {canWrite && (
-                    <td className="py-3 pe-4 sm:pe-5">
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          className="p-1.5 rounded-md text-muted-foreground hover:text-primary hover:bg-primary/5 transition-colors"
-                          onClick={() => { setEditing(rt); setDialogOpen(true) }}
-                          aria-label={t('common.edit')}
-                          title={t('common.edit')}
-                        >
-                          <Pencil size={13} />
-                        </button>
-                        <button
-                          className="p-1.5 rounded-md text-muted-foreground hover:text-rose-500 hover:bg-rose-50 transition-colors"
-                          onClick={() => setDeletingRecurring(rt)}
-                          disabled={deleteMutation.isPending}
-                          aria-label={t('common.delete')}
-                          title={t('common.delete')}
-                        >
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    </td>
-                  )}
+                  {/* Fork F-005 (Q14): the row menu; Occurrences is there in read-only workspaces too. */}
+                  <td className="py-3 pe-4 sm:pe-5 text-end">
+                    <RowMenu rt={rt} canWrite={canWrite} onAction={(action) => lifecycle.handle(rt, action)} />
+                  </td>
                 </tr>
               ))}
             </tbody>
           </table>
         ) : (
-          <p className="text-sm text-muted-foreground text-center py-10">{t('recurring.empty')}</p>
+          <p className="text-sm text-muted-foreground text-center py-10">
+            {tab === 'active' ? t('recurring.empty') : t(`fork.recurringLifecycle.empty.${tab}`)}
+          </p>
         )}
       </SectionCard>
 
@@ -494,6 +483,7 @@ function RecurringTab() {
             accounts={accountsList ?? []}
             onSave={(data) => {
               if (editing) {
+                if (lifecycle.askScope(editing as LifecycleRecurring, data)) return  // fork F-005 (Q16)
                 updateMutation.mutate({ id: editing.id, ...data })
               } else {
                 createMutation.mutate(data)
@@ -505,14 +495,7 @@ function RecurringTab() {
         </DialogContent>
       </Dialog>
 
-      <DeleteConfirmationDialog
-        open={!!deletingRecurring}
-        title={t('recurring.confirmDeleteTitle')}
-        description={t('recurring.confirmDeleteDescription', { description: deletingRecurring?.description })}
-        isPending={deleteMutation.isPending}
-        onClose={() => setDeletingRecurring(null)}
-        onConfirm={() => deletingRecurring && deleteMutation.mutate(deletingRecurring.id)}
-      />
+      {lifecycle.dialogs}
     </>
   )
 }

@@ -60,5 +60,164 @@
   "projections": {
     "invoiceExpected": "Cobrança {{number}} (prevista)",
     "invoiceExpectedNoNumber": "Cobrança (prevista)"
+  },
+  "recurringLifecycle": {
+    "tabs": {
+      "active": "Ativas ({{count}})",
+      "inactive": "Inativas ({{count}})",
+      "deleted": "Excluídas ({{count}})"
+    },
+    "empty": {
+      "inactive": "Nenhuma recorrência pausada ou encerrada.",
+      "deleted": "Nenhuma recorrência excluída."
+    },
+    "menu": {
+      "open": "Ações de {{description}}",
+      "edit": "Editar",
+      "occurrences": "Ocorrências",
+      "priceHistory": "Histórico de preços",
+      "pause": "Pausar",
+      "resume": "Retomar",
+      "end": "Encerrar série...",
+      "delete": "Excluir",
+      "restore": "Restaurar",
+      "purge": "Excluir permanentemente"
+    },
+    "paused": "Pausada",
+    "resumed": "Retomada",
+    "since": "desde {{date}}: {{amount}} (antes {{previous}})",
+    "deletedOn": "Excluída em {{date}}",
+    "overdue": {
+      "title_one": "{{count}} ocorrência em atraso (com data de hoje ou anterior, ainda não registrada; não conta em nada até ser registrada)",
+      "title_other": "{{count}} ocorrências em atraso (com data de hoje ou anterior, ainda não registradas; não contam em nada até serem registradas)",
+      "record": "Registrar",
+      "link": "Vincular uma transação",
+      "skip": "Pular",
+      "upcoming_one": "{{count}} ocorrência em atraso não registrada",
+      "upcoming_other": "{{count}} ocorrências em atraso não registradas",
+      "review": "Revisar"
+    },
+    "occurrences": {
+      "title": "{{description}}: ocorrências",
+      "date": "Data",
+      "amount": "Valor",
+      "state": "Situação",
+      "help": "Editar registra essa ocorrência agora como uma transação com valor e data próprios; a série não muda.",
+      "empty": "Nenhuma ocorrência neste período.",
+      "states": {
+        "recorded": "Registrada",
+        "edited": "Editada",
+        "skipped": "Pulada",
+        "removed": "Transação excluída",
+        "scheduled": "Agendada",
+        "overdue": "Em atraso",
+        "past": "Não registrada"
+      },
+      "edit": "Editar",
+      "skip": "Pular",
+      "undoSkip": "Desfazer pulo",
+      "openTransaction": "Abrir transação",
+      "record": "Registrar",
+      "link": "Vincular uma transação",
+      "skipped": "Ocorrência pulada",
+      "unskipped": "Pulo desfeito"
+    },
+    "record": {
+      "titleEdit": "Editar a ocorrência de {{date}}",
+      "titleRecord": "Registrar a ocorrência de {{date}}",
+      "help": "Ela é registrada agora como uma transação com estes valores; a série mantém os seus.",
+      "amount": "Valor",
+      "date": "Data",
+      "received": "Valor recebido",
+      "save": "Registrar",
+      "done": "Ocorrência registrada"
+    },
+    "link": {
+      "title": "Vincular uma transação à ocorrência de {{date}}",
+      "help": "Transações da mesma conta e do mesmo tipo, em até 20 dias, sem vínculo com outra recorrência.",
+      "empty": "Nenhuma transação correspondente.",
+      "save": "Vincular",
+      "done": "Transação vinculada"
+    },
+    "changeFrom": {
+      "title": "Aplicar a alteração a partir de quando?",
+      "fromOption": "A partir de {{date}}",
+      "fromDate": "Alterar a partir de",
+      "fromHelpAmount": "As ocorrências anteriores mantêm {{amount}}. A série mostra os dois valores.",
+      "fromHelp": "As ocorrências anteriores mantêm seus valores.",
+      "whole": "Corrigir a série inteira",
+      "wholeHelp": "Para corrigir um erro: a própria recorrência muda.",
+      "wholeUnchanged": "Transações já registradas continuam como estão.",
+      "impactTitle": "O que acontece com as transações já registradas",
+      "follow_one": "{{count}} transação agendada ({{dates}}) passa aos novos valores.",
+      "follow_other": "{{count}} transações agendadas ({{dates}}) passam aos novos valores.",
+      "removed_one": "{{count}} transação agendada ({{dates}}) é excluída: as novas datas a substituem.",
+      "removed_other": "{{count}} transações agendadas ({{dates}}) são excluídas: as novas datas as substituem.",
+      "edited_one": "{{count}} ocorrência que você editou ({{items}}) mantém seus valores.",
+      "edited_other": "{{count}} ocorrências que você editou ({{items}}) mantêm seus valores.",
+      "skippedDropped": "Pulos que não caem mais em uma ocorrência são descartados: {{dates}}.",
+      "history": "O histórico efetivado antes de hoje não muda.",
+      "nothing": "Nenhuma transação já registrada muda.",
+      "apply": "Aplicar",
+      "done": "Alteração aplicada"
+    },
+    "end": {
+      "title": "Encerrar \"{{description}}\"?",
+      "lastDate": "Última ocorrência em",
+      "body": "Última ocorrência em {{date}}. Nenhuma ocorrência depois dela é registrada ou prevista. A recorrência vai para Inativas.",
+      "deleteScheduled_one": "Excluir também a {{count}} transação agendada depois dessa data ({{items}})",
+      "deleteScheduled_other": "Excluir também as {{count}} transações agendadas depois dessa data ({{items}})",
+      "confirm": "Encerrar série",
+      "done": "Série encerrada"
+    },
+    "trash": {
+      "title": "Excluir \"{{description}}\"?",
+      "body_one": "Ela vai para Excluídas: deixa de ser registrada, prevista ou associada a lançamentos do banco. Você pode restaurá-la em Excluídas. Sua {{count}} transação registrada continua como está.",
+      "body_other": "Ela vai para Excluídas: deixa de ser registrada, prevista ou associada a lançamentos do banco. Você pode restaurá-la em Excluídas. Suas {{count}} transações registradas continuam como estão.",
+      "deleteScheduled_one": "Excluir também a {{count}} transação agendada depois de hoje ({{items}})",
+      "deleteScheduled_other": "Excluir também as {{count}} transações agendadas depois de hoje ({{items}})",
+      "confirm": "Excluir",
+      "done": "Movida para Excluídas"
+    },
+    "purge": {
+      "title": "Excluir \"{{description}}\" permanentemente?",
+      "body_one": "A recorrência, seus pulos e ocorrências editadas são apagados. Sua {{count}} transação registrada continua no histórico, sem o vínculo recorrente. Esta ação não pode ser desfeita.",
+      "body_other": "A recorrência, seus pulos e ocorrências editadas são apagados. Suas {{count}} transações registradas continuam no histórico, sem o vínculo recorrente. Esta ação não pode ser desfeita.",
+      "confirm": "Excluir permanentemente",
+      "done": "Excluída permanentemente"
+    },
+    "restore": {
+      "title": "Restaurar \"{{description}}\"?",
+      "deleted": "Ela foi excluída em {{date}}.",
+      "skipped_one": "A {{count}} ocorrência entre essa data e hoje ({{dates}}) é marcada como pulada.",
+      "skipped_other": "As {{count}} ocorrências entre essa data e hoje ({{dates}}) são marcadas como puladas.",
+      "next": "A próxima é {{date}}.",
+      "inactive": "Ela volta pausada, como estava.",
+      "confirm": "Restaurar",
+      "done": "Restaurada"
+    },
+    "proposal": {
+      "skip_occurrence": "Pular uma ocorrência",
+      "unskip_occurrence": "Desfazer um pulo",
+      "record_occurrence": "Registrar uma ocorrência",
+      "link_occurrence": "Vincular uma transação a uma ocorrência",
+      "change_recurring_from": "Alterar uma recorrência a partir de uma data",
+      "correct_recurring_series": "Corrigir uma recorrência",
+      "end_recurring": "Encerrar uma recorrência",
+      "delete_recurring": "Excluir uma recorrência",
+      "restore_recurring": "Restaurar uma recorrência",
+      "skip": "{{description}}: pular {{date}}",
+      "unskip": "{{description}}: desfazer o pulo de {{date}}",
+      "record": "{{description}}: registrar {{date}} como {{amount}} em {{on}}",
+      "link": "{{description}}: {{date}} é a transação \"{{transaction}}\" de {{on}}",
+      "changeFrom": "{{description}} a partir de {{date}}: {{changes}}",
+      "correct": "{{description}}, série inteira: {{changes}}",
+      "end": "{{description}}: última ocorrência {{date}}",
+      "endDelete": " (transações agendadas depois dela excluídas)",
+      "trash": "{{description}}: mover para Excluídas",
+      "trashDelete": " (transações agendadas depois de hoje excluídas)",
+      "purge": "{{description}}: excluir permanentemente",
+      "restore": "{{description}}: restaurar"
+    }
   }
 }
