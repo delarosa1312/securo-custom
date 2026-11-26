@@ -26,6 +26,9 @@ class RecurringTransactionCreate(BaseModel):
     start_date: _Date
     end_date: Optional[_Date] = None
     account_id: uuid.UUID
+    # Fork F-004: a transfer schedule from account_id to this account.
+    destination_account_id: Optional[uuid.UUID] = None
+    destination_amount: Optional[Decimal] = Field(default=None, gt=0)
     category_id: Optional[uuid.UUID] = None
     skip_first: bool = False  # Set true when first occurrence already created as a transaction
     auto_generate: bool = True  # Materialize occurrences; when false, wait for the real charge
@@ -48,6 +51,9 @@ class RecurringTransactionUpdate(BaseModel):
     start_date: Optional[_Date] = None
     end_date: Optional[_Date] = None
     account_id: Optional[uuid.UUID] = None
+    # Fork F-004: an explicit null turns a transfer schedule back into a plain one.
+    destination_account_id: Optional[uuid.UUID] = None
+    destination_amount: Optional[Decimal] = Field(default=None, gt=0)
     category_id: Optional[uuid.UUID] = None
     is_active: Optional[bool] = None
     auto_generate: Optional[bool] = None
@@ -58,6 +64,8 @@ class RecurringTransactionRead(BaseModel):
     id: uuid.UUID
     user_id: uuid.UUID
     account_id: Optional[uuid.UUID] = None
+    destination_account_id: Optional[uuid.UUID] = None  # fork F-004
+    destination_amount: Optional[Decimal] = None  # fork F-004
     category_id: Optional[uuid.UUID] = None
     description: str
     amount: Decimal

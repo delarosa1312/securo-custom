@@ -10,6 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.core.app_clock import app_today, get_workspace_timezone, today_in
+from app.fork import recurring_generation as fork_generation
+from app.fork import recurring_transfers as fork_transfers
 from app.models.account import Account
 from app.models.bank_connection import BankConnection
 from app.models.recurring_transaction import RecurringTransaction
@@ -108,6 +110,7 @@ async def create_recurring_transaction(
     data: RecurringTransactionCreate,
 ) -> RecurringTransaction:
     await _verify_account_in_workspace(session, workspace_id, data.account_id)
+    await fork_transfers.check_create(session, workspace_id, data)  # fork F-004
     if data.category_id and data.category_lines and data.category_lines.lines:
         raise ValueError("Choose either a category or a split across categories")
     source_transaction = None
@@ -149,6 +152,8 @@ async def create_recurring_transaction(
         user_id=user_id,
         workspace_id=workspace_id,
         account_id=data.account_id,
+        destination_account_id=data.destination_account_id,  # fork F-004
+        destination_amount=data.destination_amount,  # fork F-004
         category_id=data.category_id,
         description=data.description,
         amount=data.amount,
@@ -224,6 +229,9 @@ async def update_recurring_transaction(
             raise ValueError("account_id is required")
         if new_account_id != recurring.account_id:
             await _verify_account_in_workspace(session, workspace_id, new_account_id)
+    await fork_transfers.check_update(  # fork F-004
+        session, workspace_id, recurring, update_data, lines_payload
+    )
 
     schedule_changed = any(
         key in update_data and update_data[key] != getattr(recurring, key)
@@ -530,6 +538,9 @@ async def get_month_summary(
             occurrences = [day for day in occurrences if day in charged[rec.id]]
         if not occurrences:
             continue
+        if fork_transfers.is_transfer_schedule(rec):  # fork F-004: neither income nor expense
+            transfer_count += len(occurrences)
+            continue
         template = abs(rec.amount)
         if rec.has_category_lines and rec.category_lines:
             parts = [(line.category, abs(line.amount)) for line in rec.category_lines]
@@ -650,6 +661,8 @@ async def generate_pending(
         )
     )
     recurring_list = list(result.scalars().all())
+    # Fork F-004: schedules are locked one at a time in a fixed order, so two runs never deadlock.
+    recurring_list.sort(key=lambda rec: rec.id)
 
     count = 0
     for recurring in recurring_list:
@@ -657,6 +670,9 @@ async def generate_pending(
         # was required. Skip them rather than crashing on Transaction's NOT NULL
         # constraint — the user should edit the recurring to fix it.
         if recurring.account_id is None:
+            continue
+        # Fork F-004: lock the row and re-read its pointer; another run may have advanced it.
+        if not await fork_generation.lock_schedule(session, recurring):
             continue
         account = await session.get(Account, recurring.account_id)
         # Sync can move the account to another workspace. Nothing this bill
@@ -677,6 +693,16 @@ async def generate_pending(
             if recurring.end_date and recurring.next_occurrence > recurring.end_date:
                 recurring.is_active = False
                 break
+            # Fork F-004: claim the occurrence (written once, whoever runs); a transfer writes its pair.
+            outcome = await fork_generation.occurrence(
+                session, recurring, user_id, effective_occurrence
+            )
+            if outcome.wait:
+                break
+            if outcome.done:
+                count += outcome.written
+                fork_generation.advance(recurring)
+                continue
 
             # If a real transaction (synced/imported/manual) already covers this
             # occurrence, link it to the bill instead of writing a duplicate
@@ -688,6 +714,7 @@ async def generate_pending(
             )
             if existing_real is not None:
                 existing_real.recurring_transaction_id = recurring.id
+                fork_generation.record(outcome, existing_real)  # fork F-004
                 # A split bill hands its parts to an uncategorized charge.
                 await category_line_service.apply_template_split(session, existing_real, recurring)
             else:
@@ -729,6 +756,7 @@ async def generate_pending(
                     category_line_service.copy_lines_to(transaction, recurring.category_lines)
                 session.add(transaction)
                 await session.flush()
+                fork_generation.record(outcome, transaction)  # fork F-004
                 await stamp_primary_amount(session, user_id, transaction)
                 # A new row reads the rules like any other (#568). The
                 # template's category is already set, so category rules

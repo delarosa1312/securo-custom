@@ -22,6 +22,7 @@ from app.schemas.forecast import (
 )
 from app.core.config import get_settings
 from app.fork.available_balance import counts_as_available, left_out_account_ids
+from app.fork.recurring_transfers import predictive_view
 from app.services import account_service, recurring_detector_service
 from app.services.fx_rate_service import convert_or_none
 from app.services.recurring_transaction_service import get_occurrences_in_range
@@ -235,6 +236,10 @@ async def generate_cashflow_forecast(
     # patterns that are the same bill under another payee name.
     manual_rules: list[dict] = []
     for r in manual_recurrings:
+        # Fork F-004: a transfer counts only where it crosses the edge of available money.
+        r = predictive_view(r, accounts)
+        if r is None:
+            continue
         if r.account_id in left_out:  # fork F-001
             continue
         direction = FlowDirectionEnum.INFLOW if r.type == "credit" else FlowDirectionEnum.OUTFLOW
