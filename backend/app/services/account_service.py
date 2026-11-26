@@ -54,6 +54,7 @@ from app.services.credit_card_service import (
 )
 from app.services.fx_rate_service import _resolve_rate, stamp_primary_amount
 from app.models.category import Category
+from app.fork.available_balance import check_available_setting
 
 # Loan accounts only: contract terms the payment schedule is computed from.
 LOAN_TERM_FIELDS = (
@@ -455,6 +456,8 @@ def serialize_account(
         ),
         "is_closed": acc.is_closed,
         "closed_at": acc.closed_at,
+        # Fork F-001. None on an account built in memory and not yet flushed.
+        "include_in_available": acc.include_in_available is not False,
         "credit_limit": float(acc.credit_limit) if acc.credit_limit is not None else None,
         "statement_close_day": acc.statement_close_day,
         "payment_due_day": acc.payment_due_day,
@@ -639,6 +642,7 @@ async def update_account(
         k in update_data for k in ("statement_close_day", "payment_due_day")
     )
     old_type = account.type
+    check_available_setting(new_type, update_data)
 
     # Bank-connected accounts are managed by the sync pipeline. Beyond display
     # name and credit card metadata (limit + cycle days, which providers often
@@ -663,7 +667,8 @@ async def update_account(
             "card_level",
             *LOAN_TERM_FIELDS,
         }
-        disallowed = set(update_data.keys()) - editable_fields
+        # Fork F-001: the available-balance setting is a household choice, not provider data.
+        disallowed = set(update_data.keys()) - editable_fields - {"include_in_available"}
         if disallowed:
             raise ValueError("Cannot edit bank-connected accounts")
         old_type = account.type

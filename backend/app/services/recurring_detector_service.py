@@ -179,6 +179,7 @@ async def detect_recurring_patterns(
     lookback_days: int = 365,
     reference_date: Optional[date] = None,
     exclude_recurring_ids: Optional[set[uuid.UUID]] = None,
+    exclude_account_ids: Optional[set[uuid.UUID]] = None,  # fork F-001
 ) -> RecurringDetectionResponse:
     """Scan workspace transactions and identify recurring bills, subscriptions, and regular inflows.
 
@@ -223,6 +224,8 @@ async def detect_recurring_patterns(
     clusters: dict[tuple[str, FlowDirectionEnum], list[Transaction]] = {}
     for tx in transactions:
         if exclude_recurring_ids and tx.recurring_transaction_id in exclude_recurring_ids:
+            continue
+        if exclude_account_ids and tx.account_id in exclude_account_ids:  # fork F-001
             continue
         raw_name = tx.payee or tx.description
         if not raw_name:

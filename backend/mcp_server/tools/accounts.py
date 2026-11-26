@@ -61,6 +61,8 @@ async def list_accounts(
             "balance_primary": num(r.get("balance_primary")),
             "is_closed": bool(r.get("is_closed", False)),
             "institution": r.get("institution_name"),
+            # Fork F-001: false leaves the account out of the available balance only.
+            "include_in_available": bool(r.get("include_in_available", True)),
         }
         # On a connected account the stored balance is the provider's snapshot
         # of today, not the opening balance, so it has no opening to report.

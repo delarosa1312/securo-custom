@@ -74,6 +74,8 @@ class AccountUpdate(BaseModel):
     loan_term_months: Optional[int] = Field(default=None, ge=1, le=600)
     loan_first_payment_date: Optional[date] = None
     loan_amortization: Optional[LoanAmortization] = None
+    # Fork F-001: checking, savings and wallet only (app/fork/available_balance.py).
+    include_in_available: Optional[bool] = None
 
 
 class AccountReservedBalanceRead(BaseModel):
@@ -143,6 +145,8 @@ class AccountRead(AccountBase):
     open_bill_total_primary: Optional[float] = None
     is_closed: bool = False
     closed_at: Optional[datetime] = None
+    # Fork F-001.
+    include_in_available: bool = True
 
     model_config = ConfigDict(from_attributes=True)
 

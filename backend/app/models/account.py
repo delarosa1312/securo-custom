@@ -77,6 +77,8 @@ class Account(Base):
     )
     is_closed: Mapped[bool] = mapped_column(Boolean, default=False)
     closed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Fork F-001 (app/fork/available_balance.py): off leaves the account out of available money only.
+    include_in_available: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
 
     connection: Mapped[Optional["BankConnection"]] = relationship(back_populates="accounts")
     institution: Mapped[Optional["Institution"]] = relationship(

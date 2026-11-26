@@ -1,5 +1,15 @@
 {
   "app": {
     "name": "Securo Custom"
+  },
+  "availableBalance": {
+    "setting": "Include in available balance",
+    "settingHint": "Turn this off for money you keep aside, like an emergency fund. The account still counts in total balance, net worth and reports.",
+    "leftOut": "Not in available balance",
+    "proposal": {
+      "title": "Available balance setting",
+      "include": "Include {{name}} in the available balance.",
+      "leaveOut": "Leave {{name}} out of the available balance. It still counts in total balance, net worth and reports."
+    }
   }
 }

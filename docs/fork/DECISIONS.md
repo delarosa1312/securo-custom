@@ -74,3 +74,13 @@ public REST API (stdlib only), so the seed follows upstream's validation instead
 live in `fork/e2e/` with their own `package.json` (Playwright, the machine's Chromium), so `frontend/package.json`
 stays upstream's. A scenario drives the screen, calls REST and calls MCP as an external client, and saves
 screenshots and JSON responses as evidence.
+
+## D-010 F-001: the dashboard keeps computing Available balance in the browser (2026-11-26)
+
+Upstream sums the headline from `GET /api/accounts` in the browser. F-001 keeps that and adds one predicate to the
+existing filter, instead of making the dashboard call the new server route: no new request, loading state or
+layout change in an upstream page. The server figure (`app/fork/available_balance.py`) uses the same inputs and
+the same rule (converted balance, or the native one with `fx_fallback` when no rate exists), and the fork tests
+pin both to the issue's worked example so they cannot drift apart unnoticed. The route lives under
+`/api/accounts` so the existing `accounts` token scope covers it; it is mounted before upstream's accounts
+router because `/{account_id}` would otherwise take the path.
