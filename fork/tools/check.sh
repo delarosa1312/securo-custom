@@ -28,6 +28,8 @@ if [[ $what == all || $what == backend ]]; then
   run "ty" backend uv run --no-sync ty check .
   run "migration chain (upstream line)" . python3 backend/scripts/check_migration_chain.py
   run "migration chain (fork line)" . python3 fork/tools/check_fork_migrations.py
+  run "release tooling" . fork/release/test.sh
+  run "Coolify files rendered" . python3 fork/deploy/render.py --check
 fi
 if [[ $what == all || $what == frontend ]]; then
   run "eslint" frontend npm run --silent lint -- --max-warnings=0

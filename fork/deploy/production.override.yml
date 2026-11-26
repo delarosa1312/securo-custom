@@ -1,0 +1,18 @@
+# Securo Custom in production: upstream's docker-compose.prod.yml with our images, nothing else.
+# Every service that runs backend code takes the same backend image and tag, so they never disagree about the
+# migration heads. SECURO_CUSTOM_TAG is required (for example v0.22.0-custom.1): never `latest`.
+# Compose CLI: docker compose -f docker-compose.prod.yml -f fork/deploy/production.override.yml ...
+# Coolify takes one file: fork/deploy/coolify/production.yml, rendered from this one by fork/deploy/render.sh.
+x-custom-backend: &custom-backend
+  image: ghcr.io/delarosa1312/securo-backend:${SECURO_CUSTOM_TAG:?}
+
+services:
+  migrate: *custom-backend
+  backend: *custom-backend
+  celery-worker: *custom-backend
+  celery-beat: *custom-backend
+  mcp-server: *custom-backend
+  plugins-runner: *custom-backend
+  plugins-egress: *custom-backend
+  frontend:
+    image: ghcr.io/delarosa1312/securo-frontend:${SECURO_CUSTOM_TAG:?}

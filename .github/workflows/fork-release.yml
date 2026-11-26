@@ -1,0 +1,97 @@
+# Securo Custom release: builds and publishes our backend and frontend images for a tag v<upstream>-custom.<n>
+# and writes the release record (docs/fork/DEPLOY.md). Upstream's release.yml stays disabled in this fork.
+# The logic lives in fork/release/ so it runs the same way locally; this file only calls it.
+# Manual run (Actions > Fork release > Run workflow): a dry run that builds both images for every platform
+# from the chosen branch and publishes nothing.
+name: Fork release
+
+on:
+  push:
+    tags: ["v*-custom.*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to label the dry run with, e.g. v0.22.0-custom.1 (nothing is published)"
+        required: true
+      platforms:
+        description: "Platforms to build"
+        default: "linux/amd64,linux/arm64"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fork-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.repository == 'delarosa1312/securo-custom'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: write
+      packages: write
+    env:
+      VERSION: ${{ github.event_name == 'push' && github.ref_name || inputs.version }}
+      PLATFORMS: ${{ inputs.platforms || 'linux/amd64,linux/arm64' }}
+    steps:
+      - name: Output folder
+        run: echo "FORK_RELEASE_OUT=$RUNNER_TEMP/release" >> "$GITHUB_ENV"
+
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          # History and tags: the script checks the commit is on main and contains the upstream base tag,
+          # and the record finds the previous release.
+          fetch-depth: 0
+
+      - name: Fetch main
+        run: git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name == 'push'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push images
+        if: github.event_name == 'push'
+        run: fork/release/build.sh "$VERSION" --push --platforms "$PLATFORMS"
+
+      - name: Build images without publishing (dry run)
+        if: github.event_name == 'workflow_dispatch'
+        run: fork/release/build.sh "$VERSION" --commit HEAD --check --platforms "$PLATFORMS"
+
+      - name: Write the release record
+        run: |
+          commit=()
+          [ "$GITHUB_EVENT_NAME" = push ] || commit=(--commit HEAD)
+          fork/release/record.py "$VERSION" "${commit[@]}" --images-env "$FORK_RELEASE_OUT/images.env" \
+            > "$FORK_RELEASE_OUT/record.md"
+          cat "$FORK_RELEASE_OUT/record.md" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish the GitHub release
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        # Not a prerelease, so releases/latest is always the newest custom release.
+        run: >
+          gh release create "$VERSION" --repo "$GITHUB_REPOSITORY" --verify-tag --latest
+          --title "$VERSION" --notes-file "$FORK_RELEASE_OUT/record.md"
+
+      - name: Keep the record and image list
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-${{ env.VERSION }}
+          path: |
+            ${{ env.FORK_RELEASE_OUT }}/record.md
+            ${{ env.FORK_RELEASE_OUT }}/images.env
