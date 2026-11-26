@@ -24,7 +24,7 @@ def _create(source, destination, **overrides) -> RecurringTransactionCreate:
         account_id=source.id, destination_account_id=destination.id if destination else None,
     )
     data.update(overrides)
-    return RecurringTransactionCreate(**data)
+    return RecurringTransactionCreate.model_validate(data)
 
 
 async def _rows(session, rec_id=None):
@@ -146,16 +146,19 @@ async def test_update_rules(session, test_user, test_workspace, test_categories)
         session, rec_id, ws_id,
         RecurringTransactionUpdate(destination_account_id=broker_id, destination_amount=Decimal("36")),
     )
+    assert moved is not None
     assert moved.destination_account_id == broker_id and moved.destination_amount == Decimal("36")
     # An explicit null turns it back into a plain schedule and drops the received amount.
     plain = await service.update_recurring_transaction(
         session, rec_id, ws_id, RecurringTransactionUpdate(destination_account_id=None)
     )
+    assert plain is not None
     assert plain.destination_account_id is None and plain.destination_amount is None
     # An edit that does not touch the transfer fields keeps them.
     kept = await service.update_recurring_transaction(
         session, rec2_id, ws_id, RecurringTransactionUpdate(amount=Decimal("250"))
     )
+    assert kept is not None
     assert kept.destination_account_id == savings_id and kept.amount == Decimal("250")
 
 
