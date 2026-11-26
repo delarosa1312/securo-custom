@@ -306,3 +306,14 @@ def test_nothing_to_sync_reports_and_writes_nothing(repos):
     assert sync.main(["--apply", "--publish", "files", "--out", str(repos["out"])]) == 0
     assert _heads(repos["origin"]) == before
     assert "Nothing to sync. Base `v1.1.0`" in (repos["out"] / "report.md").read_text()
+
+
+def test_the_dispatched_ci_run_is_linked_in_the_pull_request_body():
+    line = sync.ci_runs_line(
+        "owner/fork", "sync/v1.1.0", "https://github.com/owner/fork/actions/runs/9"
+    )
+    assert "[this commit's run](https://github.com/owner/fork/actions/runs/9)" in line
+    assert "actions/workflows/ci.yml?query=branch%3Async%2Fv1.1.0" in line
+    rep = sync.Report(base="v1.0.0", target="v1.1.0", ci=line)
+    args = type("A", (), {"base_branch": "main"})()
+    assert line in sync.proposal_body(rep, args, "pr", "sync/v1.1.0").splitlines()

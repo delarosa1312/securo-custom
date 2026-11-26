@@ -26,6 +26,8 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
+from urllib.parse import quote
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -44,7 +46,7 @@ SECURITY_NOTES_RE = re.compile(
 )
 UPSTREAM_MIGRATIONS = "backend/alembic/versions/"
 INVENTORY_DOC = "docs/fork/UPSTREAM.md"
-BEFORE_UPDATE_LIMIT = 700
+BEFORE_UPDATE_LIMIT = 1500
 
 
 def version(tag: str) -> tuple[int, int, int] | None:
@@ -288,6 +290,7 @@ class Report:
     conflicts: list[str] = field(default_factory=list)
     actions: list[str] = field(default_factory=list)
     warnings: list[str] = field(default_factory=list)
+    ci: str = ""
 
     def add(self, *lines: str) -> None:
         self.lines.extend(lines)
@@ -500,6 +503,7 @@ def sync(git: Git, args, out: Path, rep: Report) -> int:
             branch,
             can_pr=not rep.conflicts and (pushed or not changed),
             pushed=pushed,
+            head=head,
         )
         return 0
     finally:
@@ -628,8 +632,10 @@ def proposal_body(rep: Report, args, kind: str, branch: str | None) -> str:
         lines += [
             f"Branch `{branch}`: `{args.base_branch}` with the tag merged, no conflict. Nothing was resolved by hand.",
             "",
-            "Before merging, `docs/fork/UPSTREAM.md` sync procedure steps 4 to 7: overlap review of each file below, "
-            "migration upgrade of a database at the previous custom release, full suites, E2E of every active patch. "
+            *([rep.ci] if rep.ci else []),
+            "",
+            "Before merging, `docs/fork/UPSTREAM.md` sync procedure steps 5 to 8: overlap review of each file below, "
+            "the migration results below, full suites, E2E of every active patch, and the results added here. "
             "Never merge a failing sync.",
         ]
     elif kind == "conflict":
@@ -654,10 +660,62 @@ def proposal_body(rep: Report, args, kind: str, branch: str | None) -> str:
     return "\n".join(lines) + "\n"
 
 
+def ci_runs_line(repo: str, branch: str, run_url: str) -> str:
+    runs = f"https://github.com/{repo}/actions/workflows/ci.yml?query=branch%3A{quote(branch, safe='')}"
+    exact = f"[this commit's run]({run_url}), " if run_url else ""
+    return f"CI (dispatched, since a pull request opened by the workflow token starts none): {exact}[all runs on `{branch}`]({runs})."
+
+
+def dispatch_ci(rep: Report, repo: str, branch: str, head: str) -> str:
+    """Dispatch ci.yml on the sync branch and return the body line linking its run (looked up for about 30 s)."""
+    gh = ["-R", repo]
+    ci = run(["gh", "workflow", "run", "ci.yml", *gh, "--ref", branch], check=False)
+    if ci.returncode:
+        rep.warnings.append(f"CI dispatch failed: {ci.stderr.strip()}")
+        return ""
+    rep.actions.append("dispatched CI on the sync branch")
+    for _ in range(10):
+        time.sleep(3)
+        found = run(
+            [
+                "gh",
+                "run",
+                "list",
+                *gh,
+                "--workflow",
+                "ci.yml",
+                "--branch",
+                branch,
+                "--event",
+                "workflow_dispatch",
+                "--limit",
+                "5",
+                "--json",
+                "url,headSha",
+            ],
+            check=False,
+        )
+        match = next(
+            (r["url"] for r in json.loads(found.stdout or "[]") if r.get("headSha") == head), ""
+        )
+        if match:
+            return ci_runs_line(repo, branch, match)
+    return ci_runs_line(repo, branch, "")
+
+
 def publish(
-    rep: Report, args, repo: str | None, out: Path, branch: str, can_pr: bool, pushed: bool
+    rep: Report,
+    args,
+    repo: str | None,
+    out: Path,
+    branch: str,
+    can_pr: bool,
+    pushed: bool,
+    head: str,
 ) -> None:
     kind = "pr" if can_pr else ("conflict" if rep.conflicts else "manual")
+    if kind == "pr" and args.publish == "github" and args.dispatch_ci:
+        rep.ci = dispatch_ci(rep, repo, branch, head) if pushed else ci_runs_line(repo, branch, "")
     body = proposal_body(rep, args, kind, branch)
     body_file = out / ("pr-body.md" if kind == "pr" else "issue-body.md")
     body_file.write_text(body)
@@ -738,13 +796,6 @@ def publish(
                 ]
             ).stdout.strip()
             rep.actions.append(f"opened pull request {url}")
-        if pushed and args.dispatch_ci:
-            ci = run(["gh", "workflow", "run", "ci.yml", *gh, "--ref", branch], check=False)
-            rep.actions.append(
-                "dispatched CI on the sync branch"
-                if ci.returncode == 0
-                else f"CI dispatch failed: {ci.stderr.strip()}"
-            )
         stale = [p for p in prs if p["tag"] != rep.target] + issues
     else:
         same = next((i for i in issues if i["tag"] == rep.target), None)

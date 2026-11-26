@@ -69,8 +69,21 @@ Automation: `.github/workflows/fork-upstream-sync.yml` runs the tool daily (07:1
 default `GITHUB_TOKEN` that creates or updates a file under `.github/workflows/`, and upstream changed its workflow
 files in three of the four releases before `v0.22.0`. Then the job opens an issue asking for a local run
 (`python3 fork/tools/sync_upstream.py --tag <tag> --apply`, with a `gh` login that has the `workflow` scope).
-An optional secret `FORK_SYNC_TOKEN` (fine-grained, this repository only: Contents, Pull requests, Issues and
-Workflows read and write) removes that step, and a pull request it opens starts CI by itself.
+With the default token the tool dispatches `ci.yml` on the sync branch and links that run in the pull request body,
+because a pull request opened by that token starts no workflow run.
+
+Optional, not set up (2026-11-26, Matheus decides later): a secret `FORK_SYNC_TOKEN` removes the local step. The
+workflow already uses it when it exists, and then pushes and pull requests appear as made by Matheus and CI starts
+on the pull request by itself (no dispatch). To create it:
+
+1. github.com, Settings, Developer settings, Personal access tokens, Fine-grained tokens, Generate new token.
+2. Resource owner `delarosa1312`; Repository access: Only select repositories, `securo-custom`.
+3. Repository permissions, Read and write: Contents, Pull requests, Issues, Workflows (Metadata read-only is added
+   by GitHub). Nothing else, no account permissions.
+4. Expiration of his choice (GitHub mails before it expires; an expired token makes the job fail at checkout, so
+   renew it or delete the secret).
+5. In the repository: Settings, Secrets and variables, Actions, New repository secret, name `FORK_SYNC_TOKEN`, value
+   the token. Deleting the secret returns the workflow to the default token.
 
 Quoted upstream text in a proposal has `@user` and `#123` put in code, so it pings nobody and links none of our
 issues. Nothing is ever written to upstream.
