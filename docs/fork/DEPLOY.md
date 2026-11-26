@@ -71,9 +71,9 @@ migration heads (upstream's and ours), the image digests, the previous release a
 the rollback section for the first release:
 
 ```text
-Previous release: stock ghcr.io/securo-finance/securo-backend:0.22.0.
+Previous release: stock upstream images (what production ran before its first custom release).
 Rollback A (keeps data entered since the deploy), with this release's image, then the previous images:
-  alembic downgrade fork@f000; alembic downgrade f000-1
+  alembic downgrade fork@f000; alembic downgrade fork@f000-1
 Rollback B: restore the pre-deploy dump and volumes, then deploy the previous images.
 ```
 
@@ -83,7 +83,7 @@ Rollback B: restore the pre-deploy dump and volumes, then deploy the previous im
 | --- | --- |
 | `production.override.yml` | on top of `docker-compose.prod.yml`: the image of every backend service and the frontend, tag `${SECURO_CUSTOM_TAG:?}` (required: an empty tag stops the deploy instead of pulling something else). Nothing else. |
 | `staging.override.yml` | on top of the production override: health checks for `frontend`, `celery-worker`, `mcp-server`; memory and CPU limits; no host ports |
-| `coolify/production.yml`, `coolify/staging.yml` | the single files Coolify takes, rendered by `render.py`: anchors expanded, `x-` fields dropped, `mcp-server` without its profile (Coolify starts no profiles), plugin services left out. Never edit them; `check.sh` fails when they are stale |
+| `coolify/production.yml`, `coolify/staging.yml` | the single files Coolify takes, rendered by `render.py`: anchors expanded, `x-` fields dropped, `mcp-server` without its profile (so it starts whatever Coolify does with profiles), plugin services left out. Never edit them; `check.sh` fails when they are stale |
 | `rehearsal.override.yml`, `rehearse.sh`, `rehearsal_probe.py` | the local rehearsal below |
 
 Compose CLI equivalent: `docker compose -f docker-compose.prod.yml -f fork/deploy/production.override.yml up -d`.
@@ -127,7 +127,7 @@ fork/deploy/rehearse.sh custom v0.22.0-custom.1-local    # 3. coolify/production
 fork/deploy/rehearse.sh snapshot custom1 && fork/deploy/rehearse.sh compare custom1
 fork/deploy/rehearse.sh stock 0.22.0                     # 4. old tag without downgrade: migrate fails, nothing starts
 fork/deploy/rehearse.sh custom v0.22.0-custom.1-local    # 5. rollback A
-fork/deploy/rehearse.sh alembic downgrade fork@f000 && fork/deploy/rehearse.sh alembic downgrade f000-1
+fork/deploy/rehearse.sh alembic downgrade fork@f000 && fork/deploy/rehearse.sh alembic downgrade fork@f000-1
 fork/deploy/rehearse.sh stock 0.22.0 && fork/deploy/rehearse.sh snapshot rollback-a && fork/deploy/rehearse.sh compare rollback-a
 fork/deploy/rehearse.sh restore predeploy                # 7. rollback B (after upgrading again), then stock
 fork/deploy/rehearse.sh down
@@ -151,17 +151,22 @@ resource starts on new, empty volumes. Production is always that Service, edited
 
 ### Before the first change (a look, no edits)
 
-1. Open the Service > Edit Compose File, copy the whole compose into a private file on your machine (it is the
-   stock rollback; it holds variable names, not their values, but keep it out of repositories and chats anyway).
+1. Open the Service > Edit Compose File, copy the whole compose into a private file on your machine,
+   `~/securo-compose-before.yml` (it holds variable names, not their values; keep it out of repositories and
+   chats anyway). It is the stock rollback, so pin it: where its `image:` lines say `:latest`, change them in
+   that copy to `:0.22.0` (upstream's file says `latest`; a rollback must not pull a newer upstream that migrates
+   the database further).
 2. Compare it with upstream's, in this repository: `diff -u <(git show v0.22.0:docker-compose.prod.yml)
    ~/securo-compose-before.yml`. Edits of your own (pinned tags, a removed `profiles:` line, ports, labels) stay
    as they are. The lines to change are the ones this prints:
    `grep -nE 'image: ghcr.io/securo-finance/|upgrade head' ~/securo-compose-before.yml`.
-3. MCP runs today: if `mcp-server` in that file still has `profiles: [agents]`, this Coolify starts profiled
+3. Production's migration revision: Terminal > `backend` > `alembic current` must print `131 (head)`. Anything
+   else: stop and ask; the first custom release expects stock `v0.22.0`'s database.
+4. MCP runs today: if `mcp-server` in that file still has `profiles: [agents]`, this Coolify starts profiled
    services anyway; either way leave that line as it is.
-4. The CPU, only if single-architecture builds ever matter: over SSH `uname -m` (`x86_64` is amd64, `aarch64`
+5. The CPU, only if single-architecture builds ever matter: over SSH `uname -m` (`x86_64` is amd64, `aarch64`
    arm64). Releases build both.
-5. The Service's UUID (in its Coolify URL) is `U` in the SSH commands below.
+6. The Service's UUID (in its Coolify URL) is `U` in the SSH commands below.
 
 ### Staging (a new Service, synthetic data only)
 
@@ -194,12 +199,14 @@ Alternative for staging: a Git-based Docker Compose application, public reposito
      `image: ghcr.io/delarosa1312/securo-frontend:${SECURO_CUSTOM_TAG:?}`;
    - in `migrate`, `command: upgrade head` becomes `command: upgrade heads` (needed from the first upstream sync on).
    Save. If your file was identical to upstream's in step 2, pasting `fork/deploy/coolify/production.yml` instead
-   is equivalent.
+   is equivalent (it leaves out the plugin services, which production does not run).
 4. Environment Variables: set `SECURO_CUSTOM_TAG=v0.22.0-custom.1`. Change nothing else: not `SECRET_KEY`,
    `AGENTS_MCP_JWT_SECRET`, `POSTGRES_PASSWORD`, the domain, the OIDC, storage or MCP settings.
 5. Deploy (Redeploy). Each sub-resource row shows `ghcr.io/delarosa1312/...:v0.22.0-custom.1`. In Logs, `migrate`
    shows `Running upgrade 131 -> f000` and `f000 -> f001` and exits 0; then every other service starts.
-6. Verify (below). If anything is wrong: Rollback A.
+6. Verify (below). If `migrate` fails, nothing in the database changed (Alembic runs the whole upgrade in one
+   transaction): paste the stock compose back, Save, Redeploy. Anything else wrong after a successful `migrate`:
+   Rollback A.
 
 ### Verify
 
@@ -214,35 +221,40 @@ Alternative for staging: a Git-based Docker Compose application, public reposito
 ## Backups
 
 On the Coolify host over SSH, right before every production deploy. The dump holds everything in the database,
-password hashes and the instance secrets included: keep it private, on the host and on your own machine, never
-in a repository or a chat.
+password hashes and the instance secrets included: keep it private (`umask 077`), on the host and on your own
+machine, never in a repository or a chat. Every check below must print its `ok`; if one does not, stop.
 
 ```bash
-U=<resource uuid>
+umask 077
+U=<service uuid>
 mkdir -p ~/securo-backups && cd ~/securo-backups
+c() { docker ps -q --filter "label=com.docker.compose.project=$U" --filter "label=com.docker.compose.service=$1"; }
 docker ps --filter "label=com.docker.compose.project=$U" --format '{{.Label "com.docker.compose.service"}}  {{.Names}}'
-DB=$(docker ps -q --filter "label=com.docker.compose.project=$U" --filter "label=com.docker.compose.service=db")
+DB=$(c db)
+docker exec "$DB" psql -U postgres -d securo -Atc 'select version_num from alembic_version'   # 131 before the first release
 F=securo-$(date +%Y%m%d-%H%M)-before-v0.22.0-custom.1
-docker exec "$DB" pg_dump -U postgres -Fc securo > "$F.dump"
-docker exec -i "$DB" pg_restore --list < "$F.dump" | grep -c "TABLE DATA"    # about 70; 0 or an error: stop
-docker volume ls --filter "label=com.docker.compose.project=$U"                # names of attachments, agent_knowledge
+docker exec "$DB" pg_dump -U postgres -Fc securo > "$F.dump" && echo "dump ok"
+docker exec -i "$DB" pg_restore -f /dev/null < "$F.dump" && echo "dump reads to the end"
 for v in attachments agent_knowledge; do
   vol=$(docker volume ls -q --filter "label=com.docker.compose.project=$U" | grep "_$v\$")
-  docker run --rm -v "$vol:/src:ro" --entrypoint tar pgvector/pgvector:pg16 -C /src -czf - . > "$F-$v.tgz"
+  [ -n "$vol" ] || { echo "no $v volume"; continue; }
+  docker run --rm -v "$vol:/src:ro" --entrypoint tar pgvector/pgvector:pg16 -C /src -czf - . > "$F-$v.tgz" &&
+    gzip -t "$F-$v.tgz" && tar -tzf "$F-$v.tgz" > /dev/null && echo "$v ok"
 done
 ls -l "$F"*
 ```
 
-If the first `docker ps` lists nothing, this Coolify does not use the UUID as the Compose project name: find the
-containers with `docker ps --format '{{.Names}}' | grep "$U"` and the volumes with `docker volume ls | grep "$U"`,
-and use those names instead of the filters. Then copy the files to your machine (`scp`). `pgdata` itself is not copied: the dump is the database backup.
-`agent_embedding_models` is a download cache and needs no backup.
+`dump reads to the end` reads every data block, so a dump cut short (a full disk, a dropped connection) fails
+there; a count of the dump's table list would not catch that. If the first `docker ps` lists nothing, this
+Coolify does not use the UUID as the Compose project name: find the containers with
+`docker ps --format '{{.Names}}' | grep "$U"` and the volumes with `docker volume ls | grep "$U"`, and use those
+names instead of the filters. Then copy the files to your machine (`scp`). `pgdata` itself is not copied: the
+dump is the database backup. `agent_embedding_models` is a download cache and needs no backup.
 
 Where attachments live: the `backend` sub-resource's Persistent Storage tab lists an `attachments` volume when
-they are stored locally; copy it as above. To see the storage setting without printing any other value:
-`docker exec $(docker ps -q --filter "label=com.docker.compose.project=$U" --filter
-"label=com.docker.compose.service=backend") sh -c 'echo "${STORAGE_PROVIDER:-local}"'` prints `local` (the volume
-holds them) or `s3` (they are in the bucket: skip `attachments`, the bucket is untouched by a deploy).
+they are stored locally; the loop above copies it. To see the storage setting without printing any other value:
+`docker exec $(c backend) sh -c 'echo "${STORAGE_PROVIDER:-local}"'` prints `local` (the volume holds them) or
+`s3` (they are in the bucket, which a deploy does not touch; `no attachments volume` is then expected).
 
 Second and third lines, not the rollback path: Coolify's scheduled backups of the `db` component (PostgreSQL in a
 compose resource is supported; it reads `POSTGRES_USER`, `POSTGRES_PASSWORD`, `POSTGRES_DB`), and Securo's managed
@@ -258,40 +270,58 @@ The release record says which rollback applies and gives the exact commands.
 
 ### A: downgrade the fork line, then the previous images (keeps data entered since the deploy)
 
-Only when the release brought no upstream migration (the record says so). Loses what lives only in fork
-columns and tables of the removed migrations (for `f001`: the per-account "include in available balance"
-switches); everything else entered since the deploy stays.
+Only when the release record offers it: the release brought no upstream migration, and for a return to stock
+upstream's line is still where the fork root was added (`131`). Loses what lives only in fork columns and tables
+of the removed migrations (for `f001`: the per-account "include in available balance" switches); everything else
+entered since the deploy stays.
 
-1. With the new release still running: Terminal > `backend` container:
-   `alembic downgrade fork@<previous fork head>`; back to stock additionally `alembic downgrade f000-1` (removes
-   the empty fork root, leaving upstream's `131`). Never `alembic downgrade fork@base`: it walks into upstream's
-   line (D-003). `alembic current` must then show the previous release's heads. Without a Terminal tab, over
-   SSH: `docker exec $(docker ps -q --filter "label=com.docker.compose.project=$U" --filter
-   "label=com.docker.compose.service=backend") alembic downgrade fork@<previous fork head>`.
+1. With the new release still running, in any running container of its backend image (Terminal > `backend`; if
+   the backend is the part that fails, `celery-worker` or `mcp-server`, which share the image), the commands of the
+   release record, for example back to stock from `v0.22.0-custom.1`:
+   `alembic downgrade fork@f000` then `alembic downgrade fork@f000-1` (removes the empty fork root, leaving
+   upstream's `131`). Always with `fork@`: a bare `f000-1` would also undo upstream migrations newer than `131`,
+   and `fork@base` walks into upstream's line (D-003). `alembic current` must then show the previous release's
+   heads. Over SSH instead of the Terminal: `docker exec $(c celery-worker) alembic downgrade fork@f000`, with
+   `c` from the Backups section.
 2. Right away (the running new images now see a schema without their columns): previous custom release: set
-   `SECURO_CUSTOM_TAG` to it and Redeploy; back to stock: Edit Compose File, paste your private copy of the stock compose, Save,
-   remove `SECURO_CUSTOM_TAG`, Redeploy.
+   `SECURO_CUSTOM_TAG` to it and Redeploy; back to stock: Edit Compose File, paste your pinned private copy of the
+   stock compose, Save, remove `SECURO_CUSTOM_TAG`, Redeploy.
 3. Verify; `migrate` exits 0 with nothing to do.
 
 ### B: restore the pre-deploy dump (anything entered after the dump is lost)
 
+Over SSH, in `~/securo-backups`, with `c` and `DB` as in the Backups section. Each step must print its `ok`;
+until step 3 nothing live has changed, so a failure there leaves production as it was.
+
 ```bash
-U=<resource uuid>; F=<the backup name>
-for s in frontend mcp-server celery-beat celery-worker backend; do
-  docker stop $(docker ps -q --filter "label=com.docker.compose.project=$U" --filter "label=com.docker.compose.service=$s")
-done
-DB=$(docker ps -q --filter "label=com.docker.compose.project=$U" --filter "label=com.docker.compose.service=db")
-docker exec "$DB" dropdb -U postgres --force securo
-docker exec "$DB" createdb -U postgres securo
-docker exec -i "$DB" pg_restore -U postgres -d securo --exit-on-error < "$F.dump"
+umask 077; U=<service uuid>; F=<the backup name>; cd ~/securo-backups
+c() { docker ps -q --filter "label=com.docker.compose.project=$U" --filter "label=com.docker.compose.service=$1"; }
+DB=$(c db)
+# 1. Check the files, then restore into a side database while the app still runs.
+docker exec -i "$DB" pg_restore -f /dev/null < "$F.dump" && echo "dump ok"
+for v in attachments agent_knowledge; do [ ! -e "$F-$v.tgz" ] || { gzip -t "$F-$v.tgz" && tar -tzf "$F-$v.tgz" > /dev/null && echo "$v ok"; }; done
+docker exec "$DB" createdb -U postgres securo_restore
+docker exec -i "$DB" pg_restore -U postgres -d securo_restore --exit-on-error < "$F.dump" && echo "restore ok"
+# 2. Stop the app; the list must show only db and redis.
+for s in frontend mcp-server celery-beat celery-worker backend; do id=$(c $s); [ -z "$id" ] || docker stop "$id"; done
+docker ps --filter "label=com.docker.compose.project=$U" --format '{{.Label "com.docker.compose.service"}}'
+# 3. Swap: the live database becomes securo_before_rollback, the restored one securo.
+docker exec "$DB" psql -U postgres -d postgres -v ON_ERROR_STOP=1 \
+  -c "select pg_terminate_backend(pid) from pg_stat_activity where datname = 'securo' and pid <> pg_backend_pid()" \
+  -c 'alter database securo rename to securo_before_rollback' -c 'alter database securo_restore rename to securo'
+docker exec "$DB" psql -U postgres -d securo -Atc 'select version_num from alembic_version'   # the backup's revision
+# 4. Volumes, from the archives checked in step 1.
 for v in attachments agent_knowledge; do
+  [ -e "$F-$v.tgz" ] || continue
   vol=$(docker volume ls -q --filter "label=com.docker.compose.project=$U" | grep "_$v\$")
-  docker run --rm -i -v "$vol:/dst" --entrypoint sh pgvector/pgvector:pg16 -c 'find /dst -mindepth 1 -delete && tar -C /dst -xzf -' < "$F-$v.tgz"
+  docker run --rm -i -v "$vol:/dst" --entrypoint sh pgvector/pgvector:pg16 -c 'find /dst -mindepth 1 -delete && tar -C /dst -xzf -' < "$F-$v.tgz" && echo "$v restored"
 done
 ```
 
-Then, in Coolify, put back the previous images (previous tag, or the stock compose) and Redeploy. Verify against
-the numbers noted before the deploy.
+If `restore ok` does not appear: `docker exec "$DB" dropdb -U postgres securo_restore`, do not Redeploy anything,
+and production is unchanged. After step 4, in Coolify, put back the previous images (previous tag, or the pinned
+stock compose) and Redeploy. Verify against the numbers noted before the deploy. Keep `securo_before_rollback`
+until you are sure, then `docker exec "$DB" dropdb -U postgres securo_before_rollback`.
 
 ## Upgrade checklist (every release)
 

@@ -40,6 +40,9 @@ compose() {
     -f "$root/fork/deploy/rehearsal.override.yml" "$@"
 }
 
+# The running container of one service, found by Compose labels as on the Coolify host.
+svc() { docker ps -q --filter "label=com.docker.compose.project=$project" --filter "label=com.docker.compose.service=$1"; }
+
 up() {
   exec 9>"$state_dir/../heavy.lock"
   if ! flock -n 9; then echo "another heavy run holds the lock; waiting..." >&2; flock 9; fi
@@ -91,30 +94,57 @@ EOF
   compare)
     python3 "$root/fork/deploy/rehearsal_probe.py" compare "$out/${2:-$(cat "$out/baseline.txt")}.json" "$out/$1.json"
     ;;
+  # backup and restore run the commands of docs/fork/DEPLOY.md (Backups, Rollback B), with the rehearsal's
+  # Compose project in place of the Coolify Service UUID.
   backup)
     label="${1:?backup LABEL}"
-    docker exec "$db" pg_dump -U postgres -Fc securo >"$out/$label.dump"
-    docker exec -i "$db" pg_restore --list <"$out/$label.dump" | grep -c "TABLE DATA" | sed 's/^/tables with data in the dump: /'
-    for volume in attachments agent_knowledge; do
-      docker run --rm -v "${project}_$volume:/src:ro" --entrypoint tar pgvector/pgvector:pg16 -C /src -czf - . \
-        >"$out/$label-$volume.tgz"
+    umask 077
+    DB=$(svc db)
+    echo "alembic_version: $(docker exec "$DB" psql -U postgres -d securo -Atc 'select string_agg(version_num, $$,$$) from alembic_version')"
+    docker exec "$DB" pg_dump -U postgres -Fc securo >"$out/$label.dump" && echo "dump ok"
+    docker exec -i "$DB" pg_restore -f /dev/null <"$out/$label.dump" && echo "dump reads to the end"
+    for v in attachments agent_knowledge; do
+      vol=$(docker volume ls -q --filter "label=com.docker.compose.project=$project" | grep "_$v\$" || true)
+      [[ -n $vol ]] || { echo "no $v volume"; continue; }
+      docker run --rm -v "$vol:/src:ro" --entrypoint tar pgvector/pgvector:pg16 -C /src -czf - . >"$out/$label-$v.tgz" &&
+        gzip -t "$out/$label-$v.tgz" && tar -tzf "$out/$label-$v.tgz" >/dev/null && echo "$v ok"
     done
-    ls -l "$out/$label".*
+    ls -l "$out/$label".* "$out/$label"-*
     ;;
   restore)
     label="${1:?restore LABEL}"
-    for f in "$out/$label.dump" "$out/$label"-{attachments,agent_knowledge}.tgz; do
-      [[ -f $f ]] || { echo "no backup file $f" >&2; exit 1; }
+    DB=$(svc db)
+    # 1. Check every file and restore into a side database while the app still runs: nothing live is touched yet.
+    docker exec -i "$DB" pg_restore -f /dev/null <"$out/$label.dump" || { echo "dump unreadable: stop" >&2; exit 1; }
+    for v in attachments agent_knowledge; do
+      { gzip -t "$out/$label-$v.tgz" && tar -tzf "$out/$label-$v.tgz" >/dev/null; } || { echo "$v archive unreadable: stop" >&2; exit 1; }
     done
-    compose stop migrate backend celery-worker celery-beat mcp-server frontend
-    docker exec "$db" dropdb -U postgres --force securo
-    docker exec "$db" createdb -U postgres securo
-    docker exec -i "$db" pg_restore -U postgres -d securo --exit-on-error <"$out/$label.dump"
-    for volume in attachments agent_knowledge; do
-      docker run --rm -i -v "${project}_$volume:/dst" --entrypoint sh pgvector/pgvector:pg16 \
-        -c 'find /dst -mindepth 1 -delete && tar -C /dst -xzf -' <"$out/$label-$volume.tgz"
+    docker exec "$DB" createdb -U postgres securo_restore
+    if ! docker exec -i "$DB" pg_restore -U postgres -d securo_restore --exit-on-error <"$out/$label.dump"; then
+      docker exec "$DB" dropdb -U postgres securo_restore
+      echo "restore failed; the live database is untouched" >&2
+      exit 1
+    fi
+    echo "restore ok"
+    # 2. Stop the app; only db and redis may remain.
+    for s in frontend mcp-server celery-beat celery-worker backend; do
+      id=$(svc "$s"); [[ -z $id ]] || docker stop "$id" >/dev/null
     done
-    echo "restored $label; alembic_version: $(docker exec "$db" psql -U postgres -d securo -Atc 'select string_agg(version_num, $$,$$) from alembic_version')"
+    running=$(docker ps --filter "label=com.docker.compose.project=$project" --format '{{.Label "com.docker.compose.service"}}' | sort | tr '\n' ' ')
+    echo "running: $running"
+    [[ $running == "db redis " ]] || { echo "something else still runs: stop" >&2; exit 1; }
+    # 3. Swap the databases; the one from before the rollback is kept until the operator drops it.
+    docker exec "$DB" psql -U postgres -d postgres -v ON_ERROR_STOP=1 -q \
+      -c "select pg_terminate_backend(pid) from pg_stat_activity where datname = 'securo' and pid <> pg_backend_pid()" \
+      -c 'alter database securo rename to securo_before_rollback' -c 'alter database securo_restore rename to securo' >/dev/null
+    echo "alembic_version: $(docker exec "$DB" psql -U postgres -d securo -Atc 'select string_agg(version_num, $$,$$) from alembic_version')"
+    # 4. Volumes, from the archives checked in step 1.
+    for v in attachments agent_knowledge; do
+      vol=$(docker volume ls -q --filter "label=com.docker.compose.project=$project" | grep "_$v\$")
+      docker run --rm -i -v "$vol:/dst" --entrypoint sh pgvector/pgvector:pg16 \
+        -c 'find /dst -mindepth 1 -delete && tar -C /dst -xzf -' <"$out/$label-$v.tgz" && echo "$v restored"
+    done
+    docker exec "$DB" dropdb -U postgres securo_before_rollback  # the rehearsal keeps nothing; production keeps it a while
     ;;
   alembic)
     compose run --rm --no-deps -T migrate "$@"

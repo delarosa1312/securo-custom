@@ -53,8 +53,14 @@ expect "build --push refuses a tag on another commit" 1 "points to" -- "$build" 
 git tag -d v0.22.0-custom.7 >/dev/null
 
 # Rollback section. First release: back to stock removes the whole fork line, then its root.
-expect "record: first release rolls back to stock" 0 'downgrade fork@f000`; `alembic downgrade f000-1' -- \
+expect "record: first release rolls back to stock" 0 'downgrade fork@f000`; `alembic downgrade fork@f000-1`' -- \
   "$record" v0.22.0-custom.1 --commit HEAD
+# A first release cut after a sync moved upstream past the fork root's parent: only the restore applies.
+printf 'revision = "998"\ndown_revision = "131"\n' >backend/alembic/versions/998_synthetic.py
+git add -f backend/alembic/versions/998_synthetic.py && git commit -q -m "synthetic: a sync before the first release"
+expect "record: first release after a sync is restore only" 0 "a downgrade cannot take it back" -- \
+  "$record" v0.22.0-custom.1 --commit HEAD
+git checkout -q --detach "$head"
 # A previous release at the same fork head: no migration, switch the tag.
 git tag v0.22.0-custom.1 HEAD
 git tag v0.23.0-custom.1 HEAD
@@ -77,6 +83,9 @@ git add -f backend/alembic/fork_versions/f999_synthetic.py && git commit -q -m "
 expect "record: downgrade to the previous fork head" 0 "downgrade fork@$prev_head\`" -- "$record" v0.22.0-custom.3 --commit HEAD
 expect "record: previous release is the newest older tag" 0 'Previous release: `v0.22.0-custom.1`' -- \
   "$record" v0.22.0-custom.3 --commit HEAD
+expect "record: annotated and multi-line ids parse" 0 "^f999 \\['a', 'b'\\]$" -- python3 -c '
+import sys; sys.path.insert(0, "fork/release"); import record
+print(*record.migration_ids("revision: str = \"f999\"\ndown_revision: tuple = (\n    \"a\",  # \"x\"\n    \"b\",\n)\n"))'
 # A release that moves upstream's line (a sync): only the restore applies.
 cat >"backend/alembic/versions/999_synthetic.py" <<EOF
 revision = "999"

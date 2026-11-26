@@ -6,7 +6,7 @@ and our overrides, without interpolating variables, so Coolify still manages eve
   fork/deploy/coolify/staging.yml    = the same + staging.override.yml
 
 Anchors and merge keys are expanded (Coolify does not document them), `x-` fields are dropped, the MCP server
-loses its `agents` profile (Coolify starts no profiles, and production runs MCP), and the plugin services
+loses its `agents` profile (production runs MCP, whatever Coolify does with profiles), and the plugin services
 (profile `plugins`) are left out (see docs/fork/DEPLOY.md to add them).
 
 Usage: render.py [--check]   --check fails when a rendered file is stale (after an upstream sync or an edit).

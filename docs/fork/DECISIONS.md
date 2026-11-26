@@ -113,7 +113,10 @@ frontend at once, because they must agree on the migration heads. Choices:
 - Health checks and limits start in staging only; production keeps upstream's settings until staging has run on
   them.
 - Rollback A (keeps data): `alembic downgrade fork@<previous fork head>` with the new image, then the previous
-  images; back to stock also `alembic downgrade f000-1`, which removes the empty root and leaves upstream's head
-  (single upstream head only; rehearsed `f001 -> f000 -> 131`). Rollback B: restore the pre-deploy `pg_dump -Fc`
-  and volumes. `record.py` says which applies: a release that moved upstream's line can only be restored.
+  images; back to stock `alembic downgrade fork@f000` then `alembic downgrade fork@f000-1`, which removes the
+  empty root. Always `fork@`: a bare `f000-1` resolves to `131` and Alembic then also downgrades every upstream
+  migration above `131` (checked against Alembic's revision logic in the #2 deep review). Rollback B: restore the
+  pre-deploy `pg_dump -Fc` (read to the end before anything is stopped) into a side database, swap it in, restore
+  the volumes. `record.py` says which applies: a release that moved upstream's line since the previous release
+  (or, for a return to stock, past the fork root's parent) can only be restored.
 Rehearsed on synthetic data in #2 (DEPLOY.md, Rehearsal).

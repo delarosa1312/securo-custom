@@ -15,6 +15,7 @@ Stdlib only.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import subprocess
@@ -47,6 +48,26 @@ def version_key(version: str) -> tuple[int, ...]:
     return (int(m[2]), int(m[3]), int(m[4]), int(m[5]))
 
 
+def migration_ids(text: str) -> tuple[str | None, list[str]]:
+    """The revision id and its parents (down_revision) of one migration file, read as Python, not by pattern."""
+    revision, parents = None, []
+    for node in ast.parse(text).body:
+        if isinstance(node, ast.Assign) and len(node.targets) == 1:
+            target, value = node.targets[0], node.value
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            target, value = node.target, node.value
+        else:
+            continue
+        if not isinstance(target, ast.Name) or target.id not in ("revision", "down_revision"):
+            continue
+        found = ast.literal_eval(value)
+        if target.id == "revision":
+            revision = found
+        elif found is not None:
+            parents = [found] if isinstance(found, str) else list(found)
+    return revision, parents
+
+
 def heads(commit: str, folder: str) -> list[str]:
     """Alembic heads of one migration folder at a commit: revisions no other file in it builds on."""
     names = git("ls-tree", "--name-only", f"{commit}:{folder}").splitlines()
@@ -55,15 +76,24 @@ def heads(commit: str, folder: str) -> list[str]:
     for name in names:
         if not name.endswith(".py"):
             continue
-        text = git("show", f"{commit}:{folder}/{name}")
-        rev = re.search(r'^revision\s*(?::[^=]*)?=\s*["\']([^"\']+)["\']', text, re.M)
-        down = re.search(r"^down_revision\s*(?::[^=]*)?=\s*(.+)$", text, re.M)
-        if not rev:
-            continue
-        revisions.add(rev[1])
-        if down:
-            parents.update(re.findall(r'["\']([^"\']+)["\']', down[1]))
+        revision, down = migration_ids(git("show", f"{commit}:{folder}/{name}"))
+        if revision:
+            revisions.add(revision)
+            parents.update(down)
     return sorted(revisions - parents)
+
+
+def fork_root_parent(commit: str) -> list[str]:
+    """Upstream's revision under the fork root: what stock was at when the fork line was added."""
+    names = git("ls-tree", "--name-only", f"{commit}:backend/alembic/fork_versions").splitlines()
+    for name in names:
+        if name.endswith(".py"):
+            revision, down = migration_ids(
+                git("show", f"{commit}:backend/alembic/fork_versions/{name}")
+            )
+            if revision == FORK_ROOT:
+                return down
+    return []
 
 
 def fork_head(commit: str) -> str | None:
@@ -117,18 +147,19 @@ def registry_digest(image: str) -> str:
     return json.loads(out.stdout).get("digest", "")
 
 
-def rollback(version: str, commit: str, upstream_base: str, previous: str | None) -> list[str]:
+def rollback(version: str, commit: str, previous: str | None) -> list[str]:
     head = fork_head(commit)
     upstream_now = heads(commit, "backend/alembic/versions")
-    target = previous or upstream_base
-    upstream_then = heads(target, "backend/alembic/versions")
-    image_then = (
-        f"`{previous}`"
-        if previous
-        else f"stock `ghcr.io/securo-finance/securo-backend:{upstream_base[1:]}`"
-    )
-    lines = [f"Previous release: {image_then}."]
     restore = "restore the pre-deploy dump and volumes, then deploy the previous images (`docs/fork/DEPLOY.md`, Rollback B)."
+    if previous:
+        lines = [f"Previous release: `{previous}`."]
+        upstream_then = heads(previous, "backend/alembic/versions")
+    else:
+        # Back to stock: possible by downgrade only while upstream's line is still where the fork root was added.
+        lines = [
+            "Previous release: stock upstream images (what production ran before its first custom release)."
+        ]
+        upstream_then = fork_root_parent(commit)
     if upstream_now != upstream_then:
         lines.append(
             f"This release moves upstream's migration line ({', '.join(upstream_then)} to {', '.join(upstream_now)}): "
@@ -139,12 +170,13 @@ def rollback(version: str, commit: str, upstream_base: str, previous: str | None
     if previous and previous_head == head:
         lines.append("No migration since the previous release. Rollback: deploy the previous tag.")
         return lines
-    steps = [f"alembic downgrade fork@{previous_head}"] if previous_head else []
-    if not previous_head:
-        # Back to stock: remove the whole fork line, then its empty root. Never fork@base (D-003).
-        if head and head != FORK_ROOT:
-            steps.append(f"alembic downgrade fork@{FORK_ROOT}")
-        steps.append(f"alembic downgrade {FORK_ROOT}-1")
+    if previous_head:
+        steps = [f"alembic downgrade fork@{previous_head}"]
+    else:
+        # Remove the whole fork line, then its empty root. `fork@` keeps both on our branch: a bare `f000-1` would
+        # also downgrade upstream migrations above f000's parent. Never fork@base (D-003).
+        steps = [f"alembic downgrade fork@{FORK_ROOT}"] if head and head != FORK_ROOT else []
+        steps.append(f"alembic downgrade fork@{FORK_ROOT}-1")
     lines.append(
         "Rollback A (keeps data entered since the deploy), with this release's image, then the previous images: "
         + "; ".join(f"`{s}`" for s in steps)
@@ -213,7 +245,7 @@ def main() -> int:
     for ref, digest in images.values():
         out.append(f"| `{ref}` | {f'`{digest}`' if digest else 'not published'} |")
     out += ["", "## Rollback", ""]
-    out += [f"- {line}" for line in rollback(version, commit, upstream_base, previous)]
+    out += [f"- {line}" for line in rollback(version, commit, previous)]
     out += ["", "## Patches carried", "", "| Patch | Issue / PR |", "| --- | --- |"]
     out += [f"| {patch} | {issue} |" for patch, issue in patch_list(commit)]
     print("\n".join(out))
