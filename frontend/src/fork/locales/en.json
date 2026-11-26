@@ -30,6 +30,26 @@
     "empty": "No budgets in this period. Set budgets on the Budgets page to include them here.",
     "slice": "{{name}} · budget"
   },
+  "recurringTransfers": {
+    "typeTransfer": "Transfer",
+    "fromAccount": "From account",
+    "toAccount": "To account",
+    "selectAccount": "Select an account",
+    "amountReceived": "Amount received ({{currency}})",
+    "amountReceivedHint": "The accounts use different currencies: this is what arrives in {{name}} each time.",
+    "route": "{{from}} to {{to}}",
+    "proposal": {
+      "create_recurring_transfer": "New recurring transfer",
+      "update_recurring_transfer": "Edit recurring transfer",
+      "convert_transfer_series": "Convert scheduled transfers",
+      "create": "{{description}}: {{amount}} from {{from}} to {{to}}, {{frequency}}",
+      "received": " ({{amount}} received)",
+      "update": "{{description}}: {{changes}}",
+      "convert": "{{count}} scheduled transfers of {{amount}} from {{from}} to {{to}} ({{description}}, {{frequency}}) become one recurring transfer.",
+      "convertEnds": " It ends on {{date}}.",
+      "convertOpen": " It keeps going after the last one."
+    }
+  },
   "reports": {
     "budgetExpenses": "Budgeted Spending",
     "unallocatedBudget": "Unallocated Budget",

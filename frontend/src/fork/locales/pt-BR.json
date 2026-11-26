@@ -30,6 +30,26 @@
     "empty": "Nenhum orçamento no período. Defina orçamentos na página Orçamentos para incluí-los aqui.",
     "slice": "{{name}} · orçamento"
   },
+  "recurringTransfers": {
+    "typeTransfer": "Transferência",
+    "fromAccount": "Conta de origem",
+    "toAccount": "Conta de destino",
+    "selectAccount": "Selecione uma conta",
+    "amountReceived": "Valor recebido ({{currency}})",
+    "amountReceivedHint": "As contas usam moedas diferentes: este é o valor que chega em {{name}} a cada vez.",
+    "route": "{{from}} para {{to}}",
+    "proposal": {
+      "create_recurring_transfer": "Nova transferência recorrente",
+      "update_recurring_transfer": "Editar transferência recorrente",
+      "convert_transfer_series": "Converter transferências agendadas",
+      "create": "{{description}}: {{amount}} de {{from}} para {{to}}, {{frequency}}",
+      "received": " ({{amount}} recebidos)",
+      "update": "{{description}}: {{changes}}",
+      "convert": "{{count}} transferências agendadas de {{amount}} de {{from}} para {{to}} ({{description}}, {{frequency}}) viram uma transferência recorrente.",
+      "convertEnds": " Termina em {{date}}.",
+      "convertOpen": " Continua depois da última."
+    }
+  },
   "reports": {
     "budgetExpenses": "Gastos Orçados",
     "unallocatedBudget": "Orçamento Não Alocado",

@@ -21,6 +21,7 @@ import {
 
 import type { ProposalKind, ProposalData, TransferLeg } from '@/lib/agent-proposals'
 import { applySetAccountAvailable, setAccountAvailableSummary } from '@/fork/available-balance/proposal'
+import { applyRecurringTransfer, isRecurringTransferKind, recurringTransferSummary, recurringTransferTitle } from '@/fork/recurring-transfers/proposal'
 
 interface Props {
   toolCallId: string
@@ -167,6 +168,7 @@ function kindTitle(kind: ProposalKind, t: ReturnType<typeof useTranslation>['t']
   if (kind === 'create_manual_account') return t('accounts.addManual')
   if (kind === 'update_manual_account') return t('accounts.editAccount')
   if (kind === 'set_account_available') return t('fork.availableBalance.proposal.title')
+  if (isRecurringTransferKind(kind)) return recurringTransferTitle(kind, t) // fork F-004
   return t(`agents.proposal.kind.${kind}`)
 }
 
@@ -211,6 +213,7 @@ function renderSummary(
 ): string {
   const p = (d.proposed || {}) as Record<string, unknown>
   const tgt = (d.target || {}) as Record<string, unknown>
+  if (isRecurringTransferKind(kind)) return recurringTransferSummary(kind, d, t, fmt) // fork F-004
   switch (kind) {
     case 'categorize':
       return t('agents.proposal.summary.categorize', {
@@ -463,6 +466,7 @@ function rejectNameCollision(data: ProposalData): void {
 // affordance can deep-link to it.
 async function applyProposal(data: ProposalData): Promise<string | void> {
   const p = (data.proposed || {}) as Record<string, unknown>
+  if (isRecurringTransferKind(data.kind)) return applyRecurringTransfer(data.kind, data) // fork F-004
   switch (data.kind) {
     case 'categorize': {
       const ids = (data.affected || []).map((a) => a.id)

@@ -1317,6 +1317,9 @@ export interface RecurringTransaction {
   /** Split across categories: every occurrence starts with these parts. */
   has_category_lines?: boolean
   category_lines?: TransactionCategoryLine[]
+  /** Fork F-004: set on a recurring transfer; destination_amount only between currencies. */
+  destination_account_id?: string | null
+  destination_amount?: number | string | null
 }
 
 // Read-only price-change projections. Derived from linked transaction
