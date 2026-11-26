@@ -1,0 +1,60 @@
+# Securo Custom staging in Coolify: production.override.yml plus health checks for the services upstream leaves
+# without one, memory and CPU limits per service, and no host ports (Coolify's proxy reaches the frontend by its
+# domain, and a second stack on the production host must not take production's ports 3000, 8000 and 8765).
+# Limits are sized for a small single-user instance from the local measurements in docs/fork/DEPLOY.md
+# (assumptions, not upstream guidance); a container over its memory limit is killed and restarted.
+services:
+  db:
+    mem_limit: 1g
+    cpus: 1.0
+
+  redis:
+    mem_limit: 128m
+    cpus: 0.25
+
+  migrate:
+    mem_limit: 512m
+    cpus: 1.0
+
+  backend:
+    ports: !reset []
+    mem_limit: 1536m
+    cpus: 1.0
+
+  celery-worker:
+    mem_limit: 1536m
+    cpus: 1.0
+    # Asks the worker itself over Redis; a hung worker fails it. Starts a short Python process, hence the
+    # long interval.
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.worker inspect ping -d celery@$$HOSTNAME --timeout 10 >/dev/null"]
+      interval: 2m
+      timeout: 30s
+      start_period: 1m
+      retries: 3
+
+  celery-beat:
+    mem_limit: 384m
+    cpus: 0.25
+
+  mcp-server:
+    ports: !reset []
+    mem_limit: 512m
+    cpus: 0.5
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8765/health', timeout=5)"]
+      interval: 30s
+      timeout: 6s
+      start_period: 30s
+      retries: 5
+
+  frontend:
+    ports: !reset []
+    mem_limit: 128m
+    cpus: 0.5
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/"]
+      interval: 30s
+      timeout: 5s
+      start_period: 10s
+      retries: 3

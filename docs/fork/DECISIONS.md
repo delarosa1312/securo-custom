@@ -126,3 +126,56 @@ added here (coordinator, 2026-11-26).
 An edit that leaves a transfer's fields alone (deactivating, an end date, a new description or amount) is not
 judged again, so a schedule whose account was closed can still be stopped; changing an account or the amount
 received is judged in full and refused while an account is closed.
+
+## D-013 Releases: our own images from a script, one tag variable, two rollbacks (2026-11-26, #2)
+
+Production runs upstream's prebuilt images on Coolify. Our images replace every backend-image service and the
+frontend at once, because they must agree on the migration heads. Choices:
+- The release logic lives in `fork/release/` (`build.sh`, `record.py`, tested by `test.sh`), and
+  `.github/workflows/fork-release.yml` only calls it: the fork had never run a workflow, and the same script
+  proves itself locally. Images build from `git archive` of a commit on `main` that contains the upstream base
+  tag, so nothing untracked reaches them. The image tag is the version verbatim (`v0.22.0-custom.1`); upstream's
+  `type=semver` would treat `-custom.1` as a prerelease, and no `latest` is pushed.
+- The production override changes images only, with one required variable `SECURO_CUSTOM_TAG` (`${...:?}`): a
+  missing tag stops the deploy, and moving between custom releases is one variable. Coolify takes one compose
+  file per resource, so `render.py` merges upstream's file with our overrides without interpolating into
+  `fork/deploy/coolify/*.yml`, and `check.sh` fails when they are stale after an upstream sync.
+- Health checks and limits start in staging only; production keeps upstream's settings until staging has run on
+  them.
+- Rollback A (keeps data): `alembic downgrade fork@<previous fork head>` with the new image, then the previous
+  images; back to stock `alembic downgrade fork@f000` then `alembic downgrade fork@f000-1`, which removes the
+  empty root. Always `fork@`: a bare `f000-1` resolves to `131` and Alembic then also downgrades every upstream
+  migration above `131` (checked against Alembic's revision logic in the #2 deep review). Rollback B: restore the
+  pre-deploy `pg_dump -Fc` (read to the end before anything is stopped) into a side database, swap it in, restore
+  the volumes. `record.py` says which applies: a release that moved upstream's line since the previous release
+  (or, for a return to stock, past the fork root's parent) can only be restored.
+Rehearsed on synthetic data in #2 (DEPLOY.md, Rehearsal).
+
+## D-014 Upstream sync: one script, a thin workflow, proposals only (2026-11-26, #3)
+
+Upstream releases every few days and the fork must stay cheap to upgrade. `fork/tools/sync_upstream.py` (stdlib,
+`git` and `gh`) holds all the logic and runs the same way by hand and in `.github/workflows/fork-upstream-sync.yml`,
+which only schedules it. It merges stable release tags only, never upstream `main`; fast-forwards `upstream-main`
+only with a plain push when a release is synced; trial-merges in a temporary detached worktree; and proposes a pull
+request (clean) or an issue (conflicts, or a push GitHub refused). It never resolves a conflict, force-pushes,
+merges, tags or deploys, and a dry run is the default. Overlaps are computed from git (files both upstream and
+`main` changed since the base tag) and matched to the patch inventory, so a hook missing from the inventory shows up
+as drift instead of being missed. The migration check upgrades a scratch database with `main` first and the merge
+second, the deploy path. Security comes from upstream advisories first and release-note words second, since
+`v0.19.0` fixed an advisory its notes do not mention.
+The workflow runs in two jobs (review of #3): the release's own code (chain checks, uv, alembic) runs only in a
+read-only job, and the write job runs git and `gh` only, redoing the merge and refusing unless its tree equals the
+tested one, so a compromised release cannot use the write token before a person reviews it. Residual: the
+migration results the write job publishes come from the job that ran the release's code; tree equality guards what
+is pushed, not that text (the tool keeps it inert: mentions and markers defanged, fences closed). The read-only job
+uses no cache, so the release's code cannot plant one that `main`'s CI restores. A dry run with failed checks fails
+in the read-only job, since it has no write job. The tool owns only a
+marked block of a proposal's body, so notes added by hand survive the daily run, and it lists files a person changed
+on the sync branch instead of calling the merge untouched.
+Consequences: with the default token most syncs need one local command, because GitHub refuses that token's pushes
+of workflow-file changes (an optional `FORK_SYNC_TOKEN` removes the step; it is a secret of the `fork-sync`
+environment limited to `main`, because a repository secret would reach the release's own workflows on the pushed
+sync branch); upstream workflow files run in the fork once merged, so the report lists them for review; while "Allow GitHub Actions to create
+and approve pull requests" is off, a clean sync needs one click to open its pull request; a pull request opened by
+the default token starts no CI, so the tool dispatches `ci.yml` (`actions: write`) and links the run; the closed
+proposals' branches stay until Matheus deletes them.

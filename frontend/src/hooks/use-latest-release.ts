@@ -1,8 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { useAutoUpdateCheck } from '@/hooks/use-auto-update-check'
-
-const LATEST_RELEASE_URL =
-  'https://api.github.com/repos/securo-finance/securo/releases/latest'
+import { LATEST_RELEASE_URL, RELEASE_REPOSITORY } from '@/fork/release/release-source'
 
 const SIX_HOURS = 1000 * 60 * 60 * 6
 
@@ -27,7 +25,7 @@ async function fetchLatestRelease(): Promise<LatestRelease | null> {
 export function useLatestRelease() {
   const { enabled } = useAutoUpdateCheck()
   return useQuery<LatestRelease | null>({
-    queryKey: ['latest-release', 'securo-finance/securo'],
+    queryKey: ['latest-release', RELEASE_REPOSITORY],
     queryFn: fetchLatestRelease,
     enabled,
     staleTime: SIX_HOURS,

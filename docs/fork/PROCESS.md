@@ -117,9 +117,10 @@ Tool-enforced approvals and permission prompts stay as they are: a refusal is re
 | Command | What it does |
 | --- | --- |
 | `fork/tools/new-branch.sh <issue> <slug>` | creates the issue-linked branch on GitHub (only GitHub can link it) and switches this worktree to it; `FORK_BRANCH_TYPE` sets the prefix (default `feat`) |
-| `fork/tools/check.sh [backend\|frontend]` | ruff, ty, upstream migration chain, fork migration chain, eslint, tsc; prints only failures |
+| `fork/tools/check.sh [backend\|frontend\|migrations]` | ruff, ty, upstream migration chain, fork migration chain, eslint, tsc; prints only failures; `migrations` runs only the two chain checks |
 | `fork/tools/test.sh backend\|frontend [args]` | pytest or vitest with 4 workers, one heavy run per machine (a lock) |
 | `fork/tools/stack.sh up\|seed\|status\|logs\|down` | the local synthetic stack for E2E (below) |
+| `python3 fork/tools/sync_upstream.py [--apply]` | upstream release sync: report (default) or proposal (`UPSTREAM.md`, D-014) |
 
 PostgreSQL-only tests (`backend/tests/*_postgres.py`) need a pgvector database: start a throwaway
 `pgvector/pgvector:pg16` container on a free loopback port, run
