@@ -74,6 +74,16 @@ def check() -> list[str]:
     heads = sorted(rev.revision for rev in fork if rev.revision not in parents)
     if len(heads) != 1:
         errors.append(f"expected exactly one fork head, found {len(heads)}: {', '.join(heads) or 'none'}")
+    elif ROOT in by_id:
+        # One head is not enough: a loop among non-root revisions also leaves one head. Walk head to root.
+        seen: set[str] = set()
+        current: str | None = heads[0]
+        while current in by_id and current not in seen:
+            seen.add(current)
+            current = None if current == ROOT else by_id[current][0].down_revision
+        if seen != set(by_id):
+            missing = ", ".join(sorted(set(by_id) - seen))
+            errors.append(f"the fork line from {heads[0]} does not reach {ROOT} through every revision: {missing}")
     return errors
 
 

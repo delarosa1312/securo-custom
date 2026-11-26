@@ -19,19 +19,31 @@ export FORK_STACK_FRONTEND_PORT="${FORK_STACK_FRONTEND_PORT:-13000}"
 export FORK_STACK_BACKEND_PORT="${FORK_STACK_BACKEND_PORT:-18000}"
 export FORK_STACK_MCP_PORT="${FORK_STACK_MCP_PORT:-18765}"
 
+# A scrubbed environment: upstream's compose file interpolates many ${VAR}s (storage, LLM keys, OIDC, SECRET_KEY)
+# from the caller's shell, and the stack must run on upstream defaults plus fork/stack/compose.yml only.
 compose() {
-  docker compose -p "$project" --project-directory "$root" \
+  env -i PATH="$PATH" HOME="$HOME" ${DOCKER_HOST:+DOCKER_HOST="$DOCKER_HOST"} \
+    ${DOCKER_CONTEXT:+DOCKER_CONTEXT="$DOCKER_CONTEXT"} ${XDG_RUNTIME_DIR:+XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR"} \
+    FORK_STACK_FRONTEND_PORT="$FORK_STACK_FRONTEND_PORT" FORK_STACK_BACKEND_PORT="$FORK_STACK_BACKEND_PORT" \
+    FORK_STACK_MCP_PORT="$FORK_STACK_MCP_PORT" \
+    docker compose -p "$project" --project-directory "$root" \
     -f "$root/docker-compose.yml" -f "$root/fork/stack/compose.yml" --profile agents "$@"
 }
 
 owner() { [[ -f $owner_file ]] && cat "$owner_file" || true; }
 running() { [[ -n "$(docker ps -q --filter "label=com.docker.compose.project=$project")" ]]; }
+# Stopped containers or leftover volumes still hold another worktree's database.
+exists() {
+  [[ -n "$(docker ps -aq --filter "label=com.docker.compose.project=$project")" ||
+    -n "$(docker volume ls -q --filter "label=com.docker.compose.project=$project")" ]]
+}
 
 guard_owner() {
   local current
   current="$(owner)"
-  if running && [[ -n $current && $current != "$root" ]]; then
-    echo "the stack is running from $current; run 'fork/tools/stack.sh down' there first" >&2
+  if exists && [[ $current != "$root" ]]; then
+    echo "the stack (containers or volumes) belongs to ${current:-an unknown worktree};" \
+      "run 'fork/tools/stack.sh down' there first" >&2
     exit 1
   fi
 }
@@ -39,9 +51,14 @@ guard_owner() {
 case "${1:-}" in
   up)
     guard_owner
-    # Upstream's backend reads backend/.env when present; the stack must run on its defaults only.
-    if [[ -e $root/backend/.env || -e $root/.env ]]; then
-      echo "refusing: a .env file exists in this worktree; the stack runs without one" >&2
+    # The image build copies backend/, Vite reads frontend/.env*, and the frontend mounts the worktree read-only:
+    # none of them may carry real configuration. Existence check only; the files are never read.
+    shopt -s nullglob
+    found=("$root"/.env* "$root"/backend/.env* "$root"/frontend/.env* "$root"/secrets "$root"/backend/secrets)
+    shopt -u nullglob
+    found=("${found[@]/%*.example/}")
+    if [[ -n ${found[*]// /} ]]; then
+      echo "refusing: real configuration in this worktree (${found[*]}); the stack runs without it" >&2
       exit 1
     fi
     echo "$root" >"$owner_file"

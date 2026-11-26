@@ -19,7 +19,7 @@ import urllib.request
 from datetime import date, timedelta
 
 EMAIL = "e2e@example.com"
-PASSWORD = "Synthetic-E2E-2026"  # local stack only; also in fork/e2e/README.md
+PASSWORD = "Synthetic-E2E-2026"  # local stack only; also in fork/e2e/lib/stack.ts and docs/fork/PROCESS.md
 CURRENCY = "USD"
 
 
@@ -123,7 +123,7 @@ def main() -> int:
     tx(checking, "Synthetic Insurer premium", "230.00", today + timedelta(days=7), "debit", insurance, "pending")
     tx(checking, "Synthetic Freelance invoice", "800.00", today + timedelta(days=20), "credit", salary, "pending")
 
-    # Installments: ten monthly parcels on the card, two of them already past.
+    # Installments: ten monthly parcels on the card, starting two months ago.
     api.call("POST", "/api/transactions/installments", {
         "base": {"account_id": card, "description": "Synthetic Laptop", "amount": "150.00",
                  "date": month_day(today, 2, 12).isoformat(), "type": "debit", "category_id": electronics,

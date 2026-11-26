@@ -29,14 +29,14 @@ test('Cash Flow report: browser, REST and MCP agree on the seeded projection', a
   // Browser: the real login screen, then the Cash Flow tab of Reports.
   await loginInBrowser(page)
   await page.goto('/reports')
+  const screenResponse = page.waitForResponse((r) => r.url().includes('/api/reports/cash-flow') && r.ok())
   await page.getByRole('tab', { name: 'Cash Flow' }).or(page.getByRole('button', { name: 'Cash Flow' })).first().click()
-  const response = await page.waitForResponse((r) => r.url().includes('/api/reports/cash-flow') && r.ok())
+  const response = await screenResponse
   const viaScreen = (await response.json()) as Report
   saveEvidence('smoke-cash-flow.screen.json', { url: response.url(), body: viaScreen })
-  const params = new URL(response.url()).searchParams
-  if (params.get('months') === '6' && params.get('interval') === 'monthly') {
-    expect(viaScreen.trend).toEqual(viaRest.trend)
-  }
+  // Whatever period the screen asked for, REST with the same query answers the same.
+  const sameQuery = await rest<Report>(token, 'GET', `/api/reports/cash-flow${new URL(response.url()).search}`)
+  expect(viaScreen.trend).toEqual(sameQuery.trend)
   await expect(page.locator('.recharts-surface').first()).toBeVisible()
   // Recharts animates for about a second; the evidence should show the drawn forecast.
   await page.waitForLoadState('networkidle')

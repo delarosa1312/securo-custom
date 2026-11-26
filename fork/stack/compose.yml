@@ -1,36 +1,32 @@
 # Overrides for the local synthetic E2E stack (fork/tools/stack.sh), applied on top of upstream's
 # docker-compose.yml. Own project name (set by stack.sh), loopback-only ports, project-scoped volumes,
 # no host secrets or backup folders. Never point this at production data.
-# Compose merges volume lists by target: these two replace the host secrets folder and the host backup folder.
-x-stack-volumes: &stack-volumes
-  - type: tmpfs
-    target: /app/secrets
-  - backups:/app/data/backups
-
-x-stack-env: &stack-env
-  AGENTS_ENABLED: "true"
-  REGISTRATION_ENABLED: "true"
-  FRONTEND_PORT: ${FORK_STACK_FRONTEND_PORT:-13000}
-  TESOURO_DIRETO_ENABLED: "false"
+#
+# Backend services run the image built from the worktree, without upstream's `./backend:/app` bind mount:
+# that mount makes Docker and the root-run containers create root-owned folders, caches and celerybeat files
+# inside the worktree, which then break host test runs. A backend code change needs `stack.sh up` again.
+x-stack-backend: &stack-backend
+  environment:
+    AGENTS_ENABLED: "true"
+    REGISTRATION_ENABLED: "true"
+    FRONTEND_PORT: ${FORK_STACK_FRONTEND_PORT:-13000}
+    TESOURO_DIRETO_ENABLED: "false"
+  volumes: !override
+    - attachments:/app/data/attachments
+    - backups:/app/data/backups
+    - agent_knowledge:/app/data/agent_knowledge
+    - agent_embedding_models:/app/data/embedding_models
 
 services:
-  migrate:
-    volumes: *stack-volumes
-    environment: *stack-env
+  migrate: *stack-backend
+  celery-worker: *stack-backend
+  celery-beat: *stack-backend
   backend:
-    volumes: *stack-volumes
-    environment: *stack-env
+    <<: *stack-backend
     ports: !override
       - "127.0.0.1:${FORK_STACK_BACKEND_PORT:-18000}:8000"
-  celery-worker:
-    volumes: *stack-volumes
-    environment: *stack-env
-  celery-beat:
-    volumes: *stack-volumes
-    environment: *stack-env
   mcp-server:
-    volumes: *stack-volumes
-    environment: *stack-env
+    <<: *stack-backend
     ports: !override
       - "127.0.0.1:${FORK_STACK_MCP_PORT:-18765}:8765"
   frontend:
