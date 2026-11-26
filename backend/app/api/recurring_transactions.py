@@ -1,6 +1,6 @@
 import uuid
 from datetime import date
-from typing import Optional
+from typing import Literal, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,10 +30,14 @@ router = APIRouter(prefix="/api/recurring-transactions", tags=["recurring-transa
 
 @router.get("", response_model=list[RecurringTransactionRead])
 async def list_recurring_transactions(
+    # Fork F-005: without it, every schedule not in Deleted (upstream's list).
+    status_filter: Optional[Literal["active", "inactive", "deleted", "all"]] = Query(None, alias="status"),
     ctx: WorkspaceContext = Depends(current_workspace),
     session: AsyncSession = Depends(get_async_session),
 ):
-    return await recurring_transaction_service.get_recurring_transactions(session, ctx.workspace.id)
+    return await recurring_transaction_service.get_recurring_transactions(
+        session, ctx.workspace.id, status_filter
+    )
 
 
 # Read-only price-change projections. Both routes are registered before
