@@ -294,6 +294,9 @@ migration is repeated; the fork's migrations only add.
 
 ## Update banner
 
-Pending decision (#2): upstream's sidebar banner polls upstream's latest release. Semver sorts `v0.22.0-custom.1`
-below `v0.22.0`, so on our images it always offers an upstream "update" whose images would not start on our
-schema.
+The sidebar banner and the update dialog read this fork's latest GitHub release
+(`delarosa1312/securo-custom/releases/latest`, Matheus 2026-11-26), so they show only when a newer custom release
+exists and link to its release notes. That is why releases are published as non-prereleases. Semver orders them
+by upstream base, then by custom number: `v0.22.0-custom.2` above `.1`, `v0.23.0-custom.1` above
+`v0.22.0-custom.3`. The dialog's upgrade command is still upstream's (`git pull && docker compose up -d --build`);
+on Coolify the upgrade is the checklist above.
