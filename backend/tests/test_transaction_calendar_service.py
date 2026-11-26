@@ -15,6 +15,7 @@ from app.models.recurring_transaction_category_line import (
 from app.models.transaction import Transaction
 from app.models.transaction_category_line import TransactionCategoryLine
 from app.services.transaction_calendar_service import get_transaction_calendar
+from tests.fork._budget_data import pin_today
 
 
 @pytest.mark.asyncio
@@ -221,8 +222,10 @@ async def test_transaction_calendar_respects_account_filter(
 
 @pytest.mark.asyncio
 async def test_transaction_calendar_keeps_pending_in_projected_activity(
-    session: AsyncSession, test_user, test_workspace
+    session: AsyncSession, test_user, test_workspace, monkeypatch
 ):
+    # Fork F-006: a pending row is projected from its date only while that date is ahead.
+    pin_today(monkeypatch, date(2026, 6, 30))
     account = Account(
         id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
         name="Pending calendar", type="checking", balance=Decimal("0"), currency="BRL",
@@ -367,13 +370,15 @@ async def test_transaction_calendar_ignores_unconverted_foreign_forecast_rows(
 
 @pytest.mark.asyncio
 async def test_transaction_calendar_counts_a_forecast_row_stored_with_other_case(
-    session: AsyncSession, test_user, test_workspace
+    session: AsyncSession, test_user, test_workspace, monkeypatch
 ):
     """A row imported as ``brl`` belongs to the ``BRL`` account.
 
     OFX carries its own ``Ccy`` and the importer stores it as sent, so the
     projected walk has to compare the codes normalized or the row reads as an
     unconverted foreign one and moves nothing (#1263)."""
+    # Fork F-006: a pending row is projected from its date only while that date is ahead.
+    pin_today(monkeypatch, date(2026, 6, 30))
     account = Account(
         id=uuid.uuid4(),
         user_id=test_user.id,

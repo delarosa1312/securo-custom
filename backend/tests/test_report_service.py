@@ -1399,7 +1399,8 @@ async def test_net_worth_counts_shared_credit_line_once(
     liabilities = [c for c in dp.composition if c.group == "liabilities"]
     assert len(liabilities) == 1
     assert liabilities[0].value == 1000.0
-    assert liabilities[0].label == "Shared Visa + Shared Mastercard"
+    # Fork F-006: accounts in name order, as on the Accounts page.
+    assert liabilities[0].label == "Shared Mastercard + Shared Visa"
 
 
 @pytest.mark.asyncio
