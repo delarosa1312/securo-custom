@@ -18,7 +18,7 @@ from typing import Any, Callable
 from app.main import app
 from app.services import reconciliation_policy
 from tests.api_contract.bodies import object_for, value_for
-from tests.api_contract.world import PNG_BYTES
+from tests.api_contract.world import MONTH, PNG_BYTES
 
 MUTATING = {"POST", "PUT", "PATCH", "DELETE"}
 
@@ -52,6 +52,7 @@ STATIC_PARAMS = {
     "provider": "pluggy",
     "key": "registration_enabled",
     "surface": "dashboard",
+    "nominal_date": MONTH,  # fork F-005: the world schedule's first occurrence
 }
 
 # Parameters that identify a row, so the unknown_id variant swaps them out.

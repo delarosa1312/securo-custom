@@ -66,6 +66,13 @@ MOVES: dict[str, list[tuple[date, str, str]]] = {
         (D(2026, 11, 27), "-200", "checking"), (D(2026, 11, 27), "200", "savings"),
         (D(2026, 12, 27), "-200", "checking"), (D(2026, 12, 27), "200", "savings"),
     ],
+    # F-005: a skipped occurrence moves nothing; an edited one moves its own amount on its own date; a split
+    # series counts each part on its own dates; a deleted one counts nowhere.
+    "recurring_skipped": [(D(2026, 11, 28), "-30", "checking")],
+    "recurring_edited": [(D(2026, 11, 28), "-30", "checking"), (D(2026, 12, 29), "-45", "checking")],
+    "recurring_split": [(D(2026, 11, 28), "-30", "checking"), (D(2026, 12, 28), "-45", "checking")],
+    "recurring_deleted": [],
+    "transfer_schedule_skipped": [(D(2026, 11, 27), "-200", "checking"), (D(2026, 11, 27), "200", "savings")],
 }
 
 # Moves a view leaves out by design (docs/fork/PROJECTIONS.md), keyed by (component, view).

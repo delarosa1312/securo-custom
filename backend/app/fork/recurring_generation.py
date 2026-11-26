@@ -156,12 +156,16 @@ async def _write_pair(
     effective_date: date,
     source: Account,
     destination: Account,
+    *,
+    amount: Optional[Decimal] = None,
+    received: Optional[Decimal] = None,
 ) -> Transaction:
     """The occurrence's two legs, built like `transaction_service.create_transfer` builds a pair.
 
     Both legs carry the schedule's link (`source="recurring"`, as upstream's generated rows) and
     each follows its own account's rule for generated rows: pending on a bank-connected account,
-    where the bank's own row is expected, posted on a manual one.
+    where the bank's own row is expected, posted on a manual one. ``amount`` and ``received``
+    replace the schedule's figures for one occurrence edited on its own (F-005).
     """
     from app.services.credit_card_service import apply_effective_date
     from app.services.fx_rate_service import stamp_primary_amount
@@ -169,10 +173,12 @@ async def _write_pair(
 
     pair_id = uuid.uuid4()
     explicit = recurring.destination_amount is not None
-    received = recurring.destination_amount if explicit else recurring.amount
+    sent = amount if amount is not None else recurring.amount
+    if received is None:
+        received = recurring.destination_amount if explicit else sent
     legs: list[Transaction] = []
-    for account, tx_type, amount in (
-        (source, "debit", recurring.amount),
+    for account, tx_type, leg_amount in (
+        (source, "debit", sent),
         (destination, "credit", received),
     ):
         leg = Transaction(
@@ -180,7 +186,7 @@ async def _write_pair(
             workspace_id=recurring.workspace_id,
             account_id=account.id,
             description=recurring.description,
-            amount=amount,
+            amount=leg_amount,
             currency=account.currency,
             date=effective_date,
             type=tx_type,

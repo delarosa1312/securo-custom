@@ -1006,10 +1006,12 @@ async def test_get_projected_transactions_no_category(session: AsyncSession, tes
 
 @pytest.mark.asyncio
 async def test_get_projected_transactions_shows_transfer_like_but_not_ignored_categories(
-    session: AsyncSession, test_user, test_workspace
+    session: AsyncSession, test_user, test_workspace, monkeypatch
 ):
     """Transfer/investment rows are visible projections without becoming P&L."""
     month_start = date.today().replace(day=1)
+    # Fork F-005 (Q12): an occurrence dated today or earlier is in the overdue list, not projected.
+    pin_today(monkeypatch, month_start - timedelta(days=1))
     transfer_like = Category(
         id=uuid.uuid4(),
         user_id=test_user.id,
@@ -1696,9 +1698,11 @@ async def test_get_projected_transactions_empty(session, test_user, test_workspa
 
 
 @pytest.mark.asyncio
-async def test_get_projected_transactions_with_recurring(session, test_user, test_workspace):
+async def test_get_projected_transactions_with_recurring(session, test_user, test_workspace, monkeypatch):
     today = date.today()
     month_start = today.replace(day=1)
+    # Fork F-005 (Q12): an occurrence dated today or earlier is in the overdue list, not projected.
+    pin_today(monkeypatch, month_start - timedelta(days=1))
     cat = Category(
         id=uuid.uuid4(), user_id=test_user.id,
         name="Rent", icon="home", color="#000",
@@ -1723,8 +1727,10 @@ async def test_get_projected_transactions_with_recurring(session, test_user, tes
 
 @pytest.mark.asyncio
 async def test_projected_transactions_use_effective_month_without_duplicates(
-    session, test_user, test_workspace
+    session, test_user, test_workspace, monkeypatch
 ):
+    # Fork F-005 (Q12): an occurrence dated today or earlier is in the overdue list, not projected.
+    pin_today(monkeypatch, date(2026, 6, 30))
     rec = RecurringTransaction(
         id=uuid.uuid4(),
         user_id=test_user.id,

@@ -64,6 +64,13 @@ class RecurringTransaction(Base):
     destination_amount: Mapped[Optional[Decimal]] = mapped_column(
         Numeric(precision=15, scale=2), nullable=True
     )
+    # Fork F-005 (migration f003): the schedule a "from this date on" change continues, and the
+    # recoverable deletion (inactive while deleted; restore gives back active_before_delete).
+    predecessor_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("recurring_transactions.id", ondelete="SET NULL"), nullable=True
+    )
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    active_before_delete: Mapped[Optional[bool]] = mapped_column(Boolean, nullable=True)
     description: Mapped[str] = mapped_column(String(500))
     amount: Mapped[Decimal] = mapped_column(Numeric(precision=15, scale=2))
     currency: Mapped[str] = mapped_column(String(3), default="USD")

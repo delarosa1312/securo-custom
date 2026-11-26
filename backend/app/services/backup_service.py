@@ -57,6 +57,8 @@ from app.models.reconciliation import (
     ReconciliationRule,
     ReconciliationSuggestion,
 )
+from app.fork.models import RecurringOccurrence  # fork F-005
+from app.fork.recurring_series import predecessors_first  # fork F-005
 from app.models.recurring_transaction import RecurringTransaction
 from app.models.recurring_transaction_category_line import RecurringTransactionCategoryLine
 from app.models.rule import Rule
@@ -166,6 +168,7 @@ RESTORE_ORDER: list[str] = [
     "asset_values",
     "asset_transactions",
     "transactions",
+    "recurring_occurrences",  # fork F-005: skipped and individually edited occurrences
     "transaction_category_lines",
     "mortgage_payment_allocations",
     "transaction_splits",
@@ -216,6 +219,7 @@ MODEL_SPECS: dict[str, EntitySpec] = {
     "asset_values": EntitySpec("asset_values", AssetValue),
     "asset_transactions": EntitySpec("asset_transactions", AssetTransaction),
     "transactions": EntitySpec("transactions", Transaction),
+    "recurring_occurrences": EntitySpec("recurring_occurrences", RecurringOccurrence),  # fork F-005: skipped and individually edited occurrences
     "transaction_category_lines": EntitySpec(
         "transaction_category_lines", TransactionCategoryLine
     ),
@@ -284,6 +288,7 @@ CONFIG_NAMES = [
     "budgets",
     "recurring_transactions",
     "recurring_transaction_category_lines",
+    "recurring_occurrences",  # fork F-005: skipped and individually edited occurrences
     "products",
     "product_prices",
     "invoice_settings",
@@ -321,6 +326,7 @@ DATA_NAMES = [
     "asset_values",
     "asset_transactions",
     "transactions",
+    "recurring_occurrences",  # fork F-005: skipped and individually edited occurrences
     "transaction_category_lines",
     "mortgage_payment_allocations",
     "transaction_splits",
@@ -344,9 +350,6 @@ BOTH_NAMES = list(dict.fromkeys([*DATA_NAMES, *CONFIG_NAMES]))
 # silently and leave a partial archive behind.
 EXCLUDED_WORKSPACE_TABLES: dict[str, str] = {
     "access_tokens": "API access secrets",
-    # Fork F-004: generation bookkeeping; a restored schedule's pointer already keeps its
-    # generated occurrences from being written again.
-    "recurring_occurrences": "which recurring occurrences generation already wrote",
     "agents": "AI agent setup of the optional agents module, tied to its provider",
     "agent_conversations": "chat history with AI agents",
     "bank_connections": "provider secrets and bank sessions",
@@ -1645,6 +1648,7 @@ async def _clear_workspace_entities(
         "transaction_splits",
         "mortgage_payment_allocations",
         "transaction_category_lines",
+        "recurring_occurrences",  # fork F-005: skipped and individually edited occurrences
         "transactions",
         "invoices",
         "invoice_schedule_terms",
@@ -1913,6 +1917,8 @@ async def restore_backup_bytes(
                 # free to insert the referencing rows first and Postgres rejects them.
                 await session.flush()
                 rows = _read_json_file(zf, name)
+                if name == "recurring_transactions":  # fork F-005: a successor needs its predecessor first
+                    rows = predecessors_first(rows)
                 if not rows:
                     restored_counts[name] = 0
                     continue

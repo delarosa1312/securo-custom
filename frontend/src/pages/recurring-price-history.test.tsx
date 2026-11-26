@@ -404,15 +404,17 @@ describe('Recurring price history', () => {
 
     // Assert the row controls before opening a modal dialog: Radix marks the
     // page behind a modal as inert, so background rows leave the a11y tree.
-    expect(
-      within(seriesRow('Netflix')).getByRole('button', { name: t('common.delete') })
-    ).toBeInTheDocument()
     expect(screen.getByRole('button', { name: t('recurring.add') })).toBeInTheDocument()
     expect(
       screen.getAllByRole('button', { name: t('recurring.viewPriceHistory') })
     ).toHaveLength(2)
 
-    await user.click(within(seriesRow('Netflix')).getByRole('button', { name: t('common.edit') }))
+    // Fork F-005 (Q14): Edit and Delete are in the row menu.
+    await user.click(within(seriesRow('Netflix')).getByRole('button', {
+      name: t('fork.recurringLifecycle.menu.open', { description: 'Netflix' }),
+    }))
+    expect(await screen.findByRole('menuitem', { name: t('fork.recurringLifecycle.menu.delete') })).toBeInTheDocument()
+    await user.click(screen.getByRole('menuitem', { name: t('fork.recurringLifecycle.menu.edit') }))
     expect(await screen.findByText(t('recurring.edit'))).toBeInTheDocument()
   })
 

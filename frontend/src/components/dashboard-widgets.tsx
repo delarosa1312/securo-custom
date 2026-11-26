@@ -29,6 +29,7 @@ import { localized } from '@/lib/localized-text'
 import { pluginWidgetWindow } from '@/lib/plugin-report-view'
 import type { DashboardSummary, InvoiceDirection, Transaction } from '@/types'
 import { isIncludedInAvailable } from '@/fork/available-balance/available-account'
+import { UpcomingOverdueLine } from '@/fork/recurring-lifecycle/overdue-section'  // fork F-005
 
 /**
  * What the dashboard is looking at, for widgets that fetch their own data.
@@ -315,6 +316,7 @@ export function UpcomingWidget({ scope }: { scope: DashboardScope }) {
 
   return (
     <WidgetCard title={t('widgets.upcoming.title')} action={<CardLink to="/recurring" label={t('widgets.viewAll')} />}>
+      <UpcomingOverdueLine activeAccountIds={scope.activeAccountIds} />{/* fork F-005 */}
       {isLoading ? (
         <Skeleton className="h-32 w-full" />
       ) : isError ? (

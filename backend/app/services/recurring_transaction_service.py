@@ -11,6 +11,8 @@ from sqlalchemy.orm import selectinload
 
 from app.core.app_clock import app_today, get_workspace_timezone, today_in
 from app.fork import recurring_generation as fork_generation
+from app.fork import recurring_lifecycle as fork_lifecycle
+from app.fork import recurring_status as fork_status
 from app.fork import recurring_transfers as fork_transfers
 from app.models.account import Account
 from app.models.bank_connection import BankConnection
@@ -61,12 +63,15 @@ async def _verify_account_in_workspace(
 
 
 async def get_recurring_transactions(
-    session: AsyncSession, workspace_id: uuid.UUID
+    session: AsyncSession, workspace_id: uuid.UUID, status: Optional[str] = None
 ) -> list[RecurringTransaction]:
     result = await session.execute(
-        select(RecurringTransaction)
-        .where(RecurringTransaction.workspace_id == workspace_id)
-        .order_by(RecurringTransaction.next_occurrence)
+        fork_status.with_status(  # fork F-005: deleted ones only on request
+            select(RecurringTransaction)
+            .where(RecurringTransaction.workspace_id == workspace_id)
+            .order_by(RecurringTransaction.next_occurrence),
+            status,
+        )
     )
     return list(result.scalars().all())
 
@@ -147,7 +152,9 @@ async def create_recurring_transaction(
     if await _find_duplicate_recurring(
         session, workspace_id, user_id, data.description, data.frequency, data.start_date
     ) is not None:
-        raise RecurringConflictError(DUPLICATE_RECURRING_MESSAGE)
+        raise RecurringConflictError(await fork_status.duplicate_message(  # fork F-005
+            session, workspace_id, user_id, data, DUPLICATE_RECURRING_MESSAGE
+        ))
     recurring = RecurringTransaction(
         user_id=user_id,
         workspace_id=workspace_id,
@@ -197,6 +204,7 @@ async def update_recurring_transaction(
     recurring = await get_recurring_transaction(session, recurring_id, workspace_id)
     if not recurring:
         return None
+    fork_status.refuse_deleted(recurring)  # fork F-005
 
     update_data = data.model_dump(exclude_unset=True)
     # Same payload rules as a transaction: absent keeps the parts, a list
@@ -415,6 +423,7 @@ async def _charged_occurrences(
         select(RecurringTransaction).where(
             RecurringTransaction.workspace_id == workspace_id,
             RecurringTransaction.is_active == False,
+            RecurringTransaction.deleted_at.is_(None),  # fork F-005: a deleted one counts nowhere
         )
     )).scalars().all()
     if not stopped:
@@ -524,6 +533,7 @@ async def get_month_summary(
     income = expenses = Decimal("0")
     transfer_count = unconverted_count = 0
     rates: dict[str, Optional[Decimal]] = {}
+    skipped = await fork_lifecycle.skipped_by_schedule(session, workspace_id, month_start, month_end)  # fork F-005
     for rec in result.scalars().all():
         occurrences = get_occurrences_in_range(
             start=rec.start_date,
@@ -536,6 +546,7 @@ async def get_month_summary(
         )
         if not rec.is_active:
             occurrences = [day for day in occurrences if day in charged[rec.id]]
+        occurrences = [day for day in occurrences if day not in skipped.get(rec.id, ())]  # fork F-005
         if not occurrences:
             continue
         if fork_transfers.is_transfer_schedule(rec):  # fork F-004: neither income nor expense

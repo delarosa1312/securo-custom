@@ -32,6 +32,7 @@ from app.services.dashboard_service import (
 )
 
 from tests.conftest import sqlite_to_char
+from tests.fork._budget_data import pin_today
 
 
 # ---------------------------------------------------------------------------
@@ -319,9 +320,11 @@ async def test_pending_shares_net_no_groups(session, test_user, test_workspace):
 
 
 @pytest.mark.asyncio
-async def test_projected_transactions_currency_conversion(session, test_user, test_workspace):
+async def test_projected_transactions_currency_conversion(session, test_user, test_workspace, monkeypatch):
     today = date.today()
     month_start = today.replace(day=1)
+    # Fork F-005 (Q12): an occurrence dated today or earlier is in the overdue list, not projected.
+    pin_today(monkeypatch, month_start - timedelta(days=1))
     await _seed_fx(session, today)
 
     # Recurring in USD; user primary is BRL -> amount_primary conversion branch
@@ -344,10 +347,12 @@ async def test_projected_transactions_currency_conversion(session, test_user, te
 
 @pytest.mark.asyncio
 async def test_projected_transactions_do_not_expose_fake_one_to_one(
-    session, test_user, test_workspace
+    session, test_user, test_workspace, monkeypatch
 ):
     today = date.today()
     month_start = today.replace(day=1)
+    # Fork F-005 (Q12): an occurrence dated today or earlier is in the overdue list, not projected.
+    pin_today(monkeypatch, month_start - timedelta(days=1))
     session.add(RecurringTransaction(
         id=uuid.uuid4(), user_id=test_user.id, workspace_id=test_workspace.id,
         description="USD without rate", amount=Decimal("10"), type="debit",

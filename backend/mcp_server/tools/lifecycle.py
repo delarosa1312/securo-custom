@@ -50,15 +50,22 @@ async def _group_names(session: AsyncSession, workspace_id) -> dict[str, str]:
         "category, and account. Use this — not list_transactions search — "
         "to answer 'what subscriptions do I have?' or 'show my recurring "
         "expenses'."
+        # Fork F-005: lifecycle status filter.
+        " status: active and inactive (default, not deleted), active, inactive, "
+        "deleted (restorable with propose_restore_recurring) or all."
     ),
-    parameters={"type": "object", "properties": {}, "additionalProperties": False},
+    parameters={
+        "type": "object",
+        "properties": {"status": {"type": "string", "enum": ["active", "inactive", "deleted", "all"]}},
+        "additionalProperties": False,
+    },
     tags=["read", "recurring"],
 )
 async def list_recurring_transactions(
-    *, session: AsyncSession, ctx: CallContext
+    *, session: AsyncSession, ctx: CallContext, status: str | None = None
 ) -> dict[str, Any]:
     ws_id = await resolve_workspace_id(session, ctx)
-    rows = await recurring_transaction_service.get_recurring_transactions(session, ws_id)
+    rows = await recurring_transaction_service.get_recurring_transactions(session, ws_id, status=status)
     items = [
         {
             "id": str(r.id),
@@ -93,6 +100,9 @@ async def list_recurring_transactions(
             # Fork F-004: set on a recurring transfer (account_id is then the source).
             "to_account_id": str(r.destination_account_id) if r.destination_account_id else None,
             "destination_amount": num(r.destination_amount),
+            # Fork F-005: the part it continues after a change from a date on, and recoverable deletion.
+            "predecessor_id": str(r.predecessor_id) if r.predecessor_id else None,
+            "deleted_at": r.deleted_at.isoformat() if r.deleted_at else None,
         }
         for r in rows
     ]

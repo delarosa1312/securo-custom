@@ -1,4 +1,5 @@
 import { RECURRING_TRANSFER_KINDS, type RecurringTransferKind } from '@/fork/recurring-transfers/kinds'
+import { RECURRING_LIFECYCLE_KINDS, type RecurringLifecycleKind } from '@/fork/recurring-lifecycle/kinds'
 
 export type ProposalKind =
   | 'categorize'
@@ -24,6 +25,7 @@ export type ProposalKind =
   | 'create_category_group'
   | 'set_account_available' // fork F-001
   | RecurringTransferKind // fork F-004
+  | RecurringLifecycleKind // fork F-005
 
 /** One leg of a transfer pair, as the transfer tools preview it. */
 export interface TransferLeg {
@@ -69,6 +71,7 @@ export function isProposalData(data: unknown): data is ProposalData {
     'update_transaction_notes', 'create_category_group',
     'set_account_available', // fork F-001
     ...RECURRING_TRANSFER_KINDS, // fork F-004
+    ...RECURRING_LIFECYCLE_KINDS, // fork F-005
   ].includes(k)
 }
 

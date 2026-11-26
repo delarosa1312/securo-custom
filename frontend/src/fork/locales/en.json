@@ -60,5 +60,165 @@
   "projections": {
     "invoiceExpected": "Invoice {{number}} (expected)",
     "invoiceExpectedNoNumber": "Invoice (expected)"
+  },
+  "recurringLifecycle": {
+    "tabs": {
+      "active": "Active ({{count}})",
+      "inactive": "Inactive ({{count}})",
+      "deleted": "Deleted ({{count}})"
+    },
+    "empty": {
+      "inactive": "No paused or ended recurring transactions.",
+      "deleted": "No deleted recurring transactions."
+    },
+    "menu": {
+      "open": "Actions for {{description}}",
+      "edit": "Edit",
+      "occurrences": "Occurrences",
+      "priceHistory": "Price history",
+      "pause": "Pause",
+      "resume": "Resume",
+      "end": "End series...",
+      "delete": "Delete",
+      "restore": "Restore",
+      "purge": "Delete permanently"
+    },
+    "paused": "Paused",
+    "resumed": "Resumed",
+    "since": "since {{date}}: {{amount}} (was {{previous}})",
+    "deletedOn": "Deleted {{date}}",
+    "overdue": {
+      "title_one": "{{count}} overdue occurrence (dated today or earlier, not recorded yet; it counts nowhere until recorded)",
+      "title_other": "{{count}} overdue occurrences (dated today or earlier, not recorded yet; they count nowhere until recorded)",
+      "record": "Record",
+      "link": "Link a transaction",
+      "skip": "Skip",
+      "upcoming_one": "{{count}} overdue occurrence not recorded",
+      "upcoming_other": "{{count}} overdue occurrences not recorded",
+      "review": "Review"
+    },
+    "occurrences": {
+      "title": "{{description}}: occurrences",
+      "date": "Date",
+      "amount": "Amount",
+      "state": "State",
+      "help": "Edit records that one occurrence now as a transaction with its own amount and date; the series does not change.",
+      "empty": "No occurrences in this period.",
+      "states": {
+        "recorded": "Recorded",
+        "edited": "Edited",
+        "skipped": "Skipped",
+        "removed": "Transaction deleted",
+        "scheduled": "Scheduled",
+        "overdue": "Overdue",
+        "past": "Not recorded"
+      },
+      "edit": "Edit",
+      "skip": "Skip",
+      "undoSkip": "Undo skip",
+      "openTransaction": "Open transaction",
+      "record": "Record",
+      "link": "Link a transaction",
+      "skipped": "Occurrence skipped",
+      "unskipped": "Skip undone"
+    },
+    "record": {
+      "titleEdit": "Edit the {{date}} occurrence",
+      "titleRecord": "Record the {{date}} occurrence",
+      "help": "It is recorded now as a transaction with these values; the series keeps its own.",
+      "amount": "Amount",
+      "date": "Date",
+      "received": "Amount received",
+      "save": "Record",
+      "done": "Occurrence recorded"
+    },
+    "link": {
+      "title": "Link a transaction to the {{date}} occurrence",
+      "help": "Transactions on the same account and of the same kind, within 20 days, not linked to another recurring transaction.",
+      "empty": "No matching transaction.",
+      "save": "Link",
+      "done": "Transaction linked"
+    },
+    "changeFrom": {
+      "title": "Apply the change from when?",
+      "fromOption": "From {{date}} on",
+      "fromDate": "Change from",
+      "fromHelpAmount": "Earlier occurrences keep {{amount}}. The series shows both amounts.",
+      "fromHelp": "Earlier occurrences keep their values.",
+      "whole": "Correct the whole series",
+      "wholeHelp": "For fixing a mistake: the schedule itself changes.",
+      "wholeUnchanged": "Transactions already recorded stay as they are.",
+      "impactTitle": "What happens to transactions already recorded",
+      "follow_one": "{{count}} scheduled transaction ({{dates}}) changes to the new values.",
+      "follow_other": "{{count}} scheduled transactions ({{dates}}) change to the new values.",
+      "removed_one": "{{count}} scheduled transaction ({{dates}}) is deleted: the new dates replace it.",
+      "removed_other": "{{count}} scheduled transactions ({{dates}}) are deleted: the new dates replace them.",
+      "edited_one": "{{count}} occurrence you edited on its own ({{items}}) keeps its values.",
+      "edited_other": "{{count}} occurrences you edited on their own ({{items}}) keep their values.",
+      "skippedDropped": "Skips that no longer fall on an occurrence are dropped: {{dates}}.",
+      "history": "Posted history before today does not change.",
+      "nothing": "No transaction already recorded changes.",
+      "apply": "Apply",
+      "done": "Change applied"
+    },
+    "end": {
+      "title": "End \"{{description}}\"?",
+      "lastDate": "Last occurrence on",
+      "body": "Last occurrence on {{date}}. No occurrence after it is recorded or forecast. It moves to Inactive after its last occurrence.",
+      "deleteScheduled_one": "Also delete the {{count}} scheduled transaction after that date ({{items}})",
+      "deleteScheduled_other": "Also delete the {{count}} scheduled transactions after that date ({{items}})",
+      "confirm": "End series",
+      "done": "Series ended"
+    },
+    "trash": {
+      "title": "Delete \"{{description}}\"?",
+      "body_one": "It moves to Deleted: no longer recorded, forecast or matched to bank rows. You can restore it from Deleted. Its {{count}} recorded transaction stays as it is.",
+      "body_other": "It moves to Deleted: no longer recorded, forecast or matched to bank rows. You can restore it from Deleted. Its {{count}} recorded transactions stay as they are.",
+      "deleteScheduled_one": "Also delete the {{count}} scheduled transaction after today ({{items}})",
+      "deleteScheduled_other": "Also delete the {{count}} scheduled transactions after today ({{items}})",
+      "confirm": "Delete",
+      "done": "Moved to Deleted"
+    },
+    "purge": {
+      "title": "Delete \"{{description}}\" permanently?",
+      "body_one": "The schedule, its skips and its edited occurrences are erased. Its {{count}} recorded transaction stays in your history without the recurring link. This cannot be undone.",
+      "body_other": "The schedule, its skips and its edited occurrences are erased. Its {{count}} recorded transactions stay in your history without the recurring link. This cannot be undone.",
+      "confirm": "Delete permanently",
+      "done": "Deleted permanently"
+    },
+    "restore": {
+      "title": "Restore \"{{description}}\"?",
+      "deleted": "It was deleted on {{date}}.",
+      "skipped_one": "The {{count}} occurrence between then and today ({{dates}}) is marked as skipped.",
+      "skipped_other": "The {{count}} occurrences between then and today ({{dates}}) are marked as skipped.",
+      "next": "The next one is {{date}}.",
+      "inactive": "It comes back paused, as it was.",
+      "confirm": "Restore",
+      "done": "Restored"
+    },
+    "wholeSeries": "This covers the whole series, its earlier parts included.",
+    "proposal": {
+      "skip_occurrence": "Skip an occurrence",
+      "unskip_occurrence": "Undo a skip",
+      "record_occurrence": "Record an occurrence",
+      "link_occurrence": "Link a transaction to an occurrence",
+      "change_recurring_from": "Change a recurring transaction from a date",
+      "correct_recurring_series": "Correct a recurring transaction",
+      "end_recurring": "End a recurring transaction",
+      "delete_recurring": "Delete a recurring transaction",
+      "restore_recurring": "Restore a recurring transaction",
+      "skip": "{{description}}: skip {{date}}",
+      "unskip": "{{description}}: undo the skip of {{date}}",
+      "record": "{{description}}: record {{date}} as {{amount}} on {{on}}",
+      "link": "{{description}}: {{date}} is the transaction \"{{transaction}}\" of {{on}}",
+      "changeFrom": "{{description}} from {{date}}: {{changes}}",
+      "correct": "{{description}}, whole series: {{changes}}",
+      "end": "{{description}}: last occurrence {{date}}",
+      "endDelete": " (scheduled transactions after it deleted)",
+      "trash": "{{description}}: move to Deleted",
+      "trashDelete": " (scheduled transactions after today deleted)",
+      "purge": "{{description}}: delete permanently",
+      "restore": "{{description}}: restore"
+    }
   }
 }

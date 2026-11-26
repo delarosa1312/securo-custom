@@ -191,3 +191,43 @@ sync branch); upstream workflow files run in the fork once merged, so the report
 and approve pull requests" is off, a clean sync needs one click to open its pull request; a pull request opened by
 the default token starts no CI, so the tool dispatches `ci.yml` (`actions: write`) and links the run; the closed
 proposals' branches stay until Matheus deletes them.
+
+## D-015 F-005: a series is a chain of schedules; one occurrence lives in the ledger; deletion is recoverable (2026-11-26, #7)
+
+Upstream edits a recurring schedule in place, so a new salary or a new price rewrites every month it ever
+projected, and its delete is permanent. The fork keeps upstream's rows and adds three columns (migration `f003`)
+and one use of the F-004 ledger:
+
+- **Change from a date on** ends the current schedule the day before (`end_date`) and starts a successor that
+  points back (`predecessor_id`). History keeps the old values because it still belongs to the old row; every
+  report, projection and generation already reads an ended schedule correctly. Without a date the whole series is
+  corrected in place (upstream's update), for a mistake. Rows the schedule already wrote are sorted the same way
+  by every action: posted and dated today or earlier never change; pending or later rows follow the change (new
+  values, or removed when the dates move and the row is still to come); a row edited on its own keeps its values.
+  The preview lists each group before anything is written. An occurrence belongs to the part its nominal date
+  falls in, whatever its row's date. The successor starts on the first occurrence from the date under its rule
+  (day 5 changed to 20 from 1 January starts on 20 January); the weekend rule alone moves no nominal date, so
+  skips stay. A schedule turning into a transfer or back cannot carry its rows, so its scheduled rows are removed
+  (listed first); a pair with one posted leg is history. When rows to come are removed, the pointer goes back to
+  their first occurrence (never before a posted one), so it is due again rather than lost.
+- **One occurrence** is a ledger row: `skipped` (never written, out of every projection) or `overridden` (written
+  now, ahead of time, with its own amount or date). Generation already refuses any date with a ledger row, so a
+  skip or an edit is never written again by the hourly job or a second worker; projections leave out the nominal
+  date through the one helper every view shares (`_materialized_recurring_occurrences`), for every ledger state
+  (a row linked ahead sits on another date). Skipping or editing at the pointer moves the pointer past it, so
+  bank matching (which reads `next_occurrence`) expects the next one. Undoing a skip behind the pointer brings
+  the pointer back only when every occurrence between is in the ledger: one that upstream's bank or import
+  match passed gets the ledger row of the transaction it matched; one with no transaction at all refuses.
+- **Overdue occurrences** (Q12) are the dates between the pointer and today with no ledger row and no row: a list
+  of their own with Record, Skip and Link; Upcoming starts tomorrow.
+- **Delete** sets `deleted_at` and `is_active = false` on every part of the series, remembering
+  `active_before_delete`: every upstream reader already ignores inactive schedules, so nothing generates, projects
+  or matches it, and its rows stay. Restore puts each part back as it was and records occurrences that fell while
+  it was deleted as skipped (nothing is backfilled). Delete permanently is only offered on a deleted series and
+  is upstream's delete (rows stay, unlinked). Upstream's `DELETE` route and the MCP
+  `propose_cancel_recurring_transaction` delete mode keep their meaning for API and assistant clients. An edit
+  of a deleted schedule is refused (it would generate while hidden); Restore brings it back, marking the missed
+  occurrences of each part that was active as skipped.
+
+The ledger is now part of backups (it holds the user's skips and edits, not only bookkeeping), and a restore
+inserts a series' parts predecessor first, as PostgreSQL checks `predecessor_id` row by row.

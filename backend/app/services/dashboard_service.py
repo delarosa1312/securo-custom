@@ -79,11 +79,14 @@ async def _materialized_recurring_occurrences(
             Transaction.date < range_end,
         )
     )
-    return {
+    found = {
         (recurring_id, transaction_date)
         for recurring_id, transaction_date in result.all()
         if recurring_id is not None
     }
+    # Fork F-005: skipped and individually edited occurrences are not projected either.
+    from app.fork.recurring_lifecycle import handled_occurrences
+    return found | await handled_occurrences(session, workspace_id, recurring_ids, range_start, range_end)
 
 
 # A card purchase is due at most a month after it (the next close) plus
@@ -1343,6 +1346,7 @@ async def get_projected_transactions(
             cat_map[row[0]] = (row[1], row[2], row[3], bool(row[4]))
 
     projections: list[ProjectedTransaction] = []
+    today = app_today()
     for rec in recurring_list:
         occurrences = _dated_occurrences(
             rec, range_start, range_end, card_cycles.get(rec.account_id)
@@ -1368,6 +1372,8 @@ async def get_projected_transactions(
 
         for occ_date, report_date in occurrences:
             if (rec.id, occ_date) in materialized_occurrences:
+                continue
+            if occ_date <= today:  # fork F-005 (Q12): not a row yet, so it is in the overdue list
                 continue
             projections.append(ProjectedTransaction(
                 recurring_id=str(rec.id),

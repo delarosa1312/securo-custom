@@ -25,7 +25,7 @@ where "Kept differences" below says otherwise.
 | --- | --- |
 | Posted rows | on their date, at the full amount, including transfer legs and rows excluded from P&L (they move a balance even when they stay out of income and expense bars) |
 | Pending rows and future-dated posted rows (installments, rows generated ahead) | on their own date, even when a bill date or a reporting date lists them later; one dated today or earlier is not in the balance yet and counts tomorrow, the first projected day |
-| Recurring occurrences | on their date while the rule is active, from the day after today; one dated today or earlier counts only once it is a row (Q12), in balances, month totals and budgets alike; an occurrence that already exists as a row counts once, as that row |
+| Recurring occurrences | on their date while the rule is active, from the day after today; one dated today or earlier counts only once it is a row (Q12), in balances, month totals and budgets alike; an occurrence that already exists as a row counts once, as that row. F-005: a skipped occurrence never counts; one edited on its own counts as its row (its amount, its date); a series changed from a date on counts each part on its own dates; a deleted series counts nowhere |
 | Rules treated as transfers ("Investments", one account only) | move the balance on their date; never in income and expense bars |
 | Rules on a closed account, rules in an ignored category, ignored rows | never |
 | Open invoices (claims) | on the due date, all accounts only (a claim has no account until it is paid); the calendar lists each one as "Invoice <number> (expected)" (Q13; "Invoice (expected)" for an agreement period not invoiced yet) |
@@ -61,9 +61,9 @@ Each one answers a different question than the other views, so making it equal w
   `opening_balance`) shows in the level, never as a day's movement. Loans stay out.
 - **Budgets** count spending, not balances: posted and scheduled spending per category, scheduled refunds and
   credits netting against it (Q9), and a category's net spending never below zero.
-- **Upcoming** lists recurring occurrences only (not pending rows or installments). Asked for a whole month it
-  still lists that month's occurrences dated today or earlier that were never generated: it is a list, not a
-  balance, and a proper overdue list belongs to F-005.
+- **Upcoming** lists recurring occurrences only (not pending rows or installments), from tomorrow. An occurrence
+  dated today or earlier that is not a row is in the overdue list instead (F-005), also when a whole month is
+  asked for.
 - **Calendar date basis.** With the "reporting" basis the calendar lists a row on its reporting date; its balance
   still moves on the row's own date, as in the other views.
 - **Group splits.** Balance views move by the full amount of a row; P&L views (bars, budgets) use the user's share.
@@ -76,8 +76,9 @@ Each one answers a different question than the other views, so making it equal w
 
 - **Overdue occurrences drop out (Q12).** Nothing dated today or earlier counts until it is a row. A bill whose
   rule has automatic generation off and was forgotten leaves every projection once its date passes, until it is
-  generated (the Generate button) or entered by hand. Counting it instead would count it twice whenever it was
-  paid by a hand-typed row the rule does not know about. A list of overdue occurrences belongs to F-005.
+  recorded, skipped or linked to the row that paid it from the overdue list (F-005; `GET
+  /api/recurring-transactions/overdue`, MCP `list_overdue_occurrences`). Counting it instead would count it twice
+  whenever it was paid by a hand-typed row the rule does not know about.
 
 - **Connected accounts, past days.** A provider's balance may or may not already hold its own pending rows, and
   each view guesses that differently for days before today. Compared from tomorrow on.
@@ -96,7 +97,8 @@ Each one answers a different question than the other views, so making it equal w
 ## Tests
 
 - `backend/tests/fork/test_projection_reconciliation.py`: one synthetic base plus one component at a time; every
-  view read at the same seven dates, all accounts and checking only, cash and accrual mode. `MOVES` lists what each
+  view read at the same seven dates, all accounts and checking only, cash and accrual mode (F-005 adds skipped,
+  edited, split and deleted series). `MOVES` lists what each
   component should do; `LEFT_OUT` and `CASH_FLOW_BILL_DATE` list the kept differences above. `_projection_data.py` builds the components,
   `_projection_views.py` reads the views.
 - `test_predictive_scheduled.py` (detected pattern against a pending row, switched-off account, overdue rows, card

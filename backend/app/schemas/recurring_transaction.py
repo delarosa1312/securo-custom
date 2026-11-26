@@ -1,5 +1,6 @@
 import uuid
 from datetime import date as _Date
+from datetime import datetime
 from decimal import Decimal
 from typing import Annotated, Literal, Optional
 
@@ -83,6 +84,8 @@ class RecurringTransactionRead(BaseModel):
     fx_rate_used: Optional[float] = None
     has_category_lines: bool = False
     category_lines: list[TransactionCategoryLineRead] = []
+    predecessor_id: Optional[uuid.UUID] = None  # fork F-005: the part of the series this one continues
+    deleted_at: Optional[datetime] = None  # fork F-005: set while in Deleted
 
     model_config = ConfigDict(from_attributes=True)
 
