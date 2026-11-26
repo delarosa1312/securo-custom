@@ -96,3 +96,15 @@ the same rule (converted balance, or the native one with `fx_fallback` when no r
 pin both to the issue's worked example so they cannot drift apart unnoticed. The route lives under
 `/api/accounts` so the existing `accounts` token scope covers it; it is mounted before upstream's accounts
 router because `/{account_id}` would otherwise take the path.
+
+## D-012 F-006: projections agree by shared rules, not one engine (2026-11-26, #8)
+
+The dashboard card, chart, Cash Flow report, calendar and predictive forecast keep their own code. Each gets
+the smallest hook that makes it count the same components the same way (`PROJECTIONS.md`), reusing the
+dashboard's helpers, and a harness (`tests/fork/test_projection_reconciliation.py`) reads every view at the same
+dates so a drift fails a test. One shared engine would rewrite most of upstream's reporting and conflict with
+every sync. Rules taken: rules on closed accounts never project; rows outside P&L move a balance on their own
+date; the predictive forecast follows included liquid accounts and card spending and counts overdue rows
+tomorrow; scheduled credits net against budget spending (Q9), never below zero. Differences that answer another
+question (predictive scope and currency, accrual Cash Flow timing, the chart's current month) stay and are
+listed there.
