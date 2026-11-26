@@ -115,6 +115,10 @@ async def occurrence(
         # for a bill whose account moved.
         return Outcome(wait=True)
     assert source is not None and destination is not None
+    # Upstream's on-demand rate sync commits the session. It runs here, before the savepoint, so
+    # the pair below is stamped from stored rates and stays one unit. A commit releases the
+    # schedule lock early; the claim's unique key still keeps the occurrence single.
+    await _warm_rates(session, user_id, effective_date, source.currency, destination.currency)
     try:
         async with session.begin_nested():
             claimed = await claim(session, recurring, nominal)
@@ -129,6 +133,20 @@ async def occurrence(
         logger.exception("Recurring transfer %s: occurrence %s not generated", recurring.id, nominal)
         return Outcome(wait=True)
     return Outcome(done=True, written=1)
+
+
+async def _warm_rates(
+    session: AsyncSession, user_id: uuid.UUID, on: date, *currencies: str
+) -> None:
+    from app.models.user import User
+    from app.services.fx_rate_service import _resolve_rate
+
+    user = await session.get(User, user_id)
+    if user is None or not user.primary_currency:
+        return
+    for currency in set(currencies):
+        if currency and currency != user.primary_currency:
+            await _resolve_rate(session, currency, user.primary_currency, on)
 
 
 async def _write_pair(
@@ -180,7 +198,8 @@ async def _write_pair(
     for leg in legs:
         await apply_rules_to_transaction(session, user_id, leg)
     for leg in legs:
-        await stamp_primary_amount(session, user_id, leg)
+        # Never fetch inside the pair: the fetch commits (see `_warm_rates`).
+        await stamp_primary_amount(session, user_id, leg, allow_fetch=False)
     # Both legs of a cross-currency pair show the same primary amount, as create_transfer does.
     if source.currency != destination.currency and debit.amount_primary is not None:
         credit.amount_primary = debit.amount_primary
