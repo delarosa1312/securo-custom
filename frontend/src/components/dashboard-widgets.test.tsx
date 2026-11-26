@@ -30,6 +30,7 @@ const api = vi.hoisted(() => ({
   invoiceSchedules: { summary: vi.fn() },
   transactions: { list: vi.fn(), flaggedSummary: vi.fn() },
   reports: { plugin: vi.fn() },
+  timezones: { list: vi.fn().mockResolvedValue({ default: 'UTC', available: [] }) },
 }))
 vi.mock('@/lib/api', () => api)
 vi.mock('@/hooks/use-display-locale', () => ({ useDisplayLocale: () => 'en-US', useDateLocale: () => 'en-US' }))

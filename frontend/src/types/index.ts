@@ -1415,6 +1415,9 @@ export interface TransactionCalendarItem {
   is_ignored: boolean
   exclude_from_pnl: boolean
   has_category_lines?: boolean
+  // Fork F-006 (Q13): an open invoice the balance counts on its due date (source "invoice").
+  invoice_id?: string | null
+  invoice_number?: string | null
 }
 
 export interface TransactionCalendarDay {

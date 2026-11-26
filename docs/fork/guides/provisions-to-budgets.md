@@ -16,7 +16,9 @@ For each budgeted category and month:
 
 - **Posted**: spending already booked this month, net of refunds in the same category (as on the Budgets page).
 - **Scheduled**: pending rows, future-dated rows (installments) and recurring occurrences in that category and
-  month. A provision schedule is one of these.
+  month, net of scheduled refunds (pending, future-dated or recurring credits in the same category), so a refund
+  frees budget before it posts and the projected end balance does not move when it posts. A provision schedule
+  is one of these. Like posted spending, a category's net spending never goes below zero.
 - **Remaining** is spread evenly per day: this month over the days left, starting tomorrow; a later month over
   all its days. Weekly and monthly views are sums of those days, to the cent.
 - With **all accounts** it is subtracted from the projected balance ("Budgeted Spending"). With an account or
@@ -84,14 +86,10 @@ they are, since the budget is not part of those accounts' flows. Over MCP, `get_
 
 ## Known limits
 
-- An unmaterialized recurring occurrence dated earlier this month (a schedule that was due but never generated)
-  counts as scheduled on the Budgets page but is not in the Cash Flow forecast, so that amount is in neither.
-  Generate or post it to fix the forecast. Issue #8 works on these differences.
+- A recurring occurrence dated today or earlier that was never generated (a schedule with automatic generation
+  off) counts nowhere until it is a row: not as scheduled, not in any projected balance. Its amount is remaining
+  budget again, so with budgets on it is spread over the days left. Generate or post it to count it as itself.
 - In accrual mode the Cash Flow places recurring card purchases on their purchase date while budgets count them
   in the bill's month; at the last month of the horizon this can count one card cycle of those schedules twice.
-- A scheduled refund (a pending or recurring credit) in a budgeted category does not free budget until it posts:
-  budgets count scheduled debits only. While it is pending the forecast counts the refund as income and the
-  budget as still to be spent, so the projected end balance drops by the refund's amount on the day it posts.
-  Issue #8 will count scheduled credits as negative scheduled spending, on the Budgets page too.
 - Spending you share with someone in a group counts at your share, as on the Budgets page, while the account
   still moves by the full amount you paid.

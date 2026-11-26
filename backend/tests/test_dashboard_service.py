@@ -29,6 +29,7 @@ from app.services.dashboard_service import (
 )
 
 from app.services.transaction_service import get_transactions
+from tests.fork._budget_data import pin_today
 
 
 # ---------------------------------------------------------------------------
@@ -1172,13 +1173,16 @@ async def test_spending_by_category_with_categorized(session, test_user, test_wo
 
 
 @pytest.mark.asyncio
-async def test_get_recurring_projections(session, test_user, test_workspace):
+async def test_get_recurring_projections(session, test_user, test_workspace, monkeypatch):
     today = date.today()
     month_start = today.replace(day=1)
     if today.month == 12:
         month_end = date(today.year + 1, 1, 1)
     else:
         month_end = date(today.year, today.month + 1, 1)
+
+    # Fork F-006 (Q12): occurrences count only after today, so today is the eve of this month.
+    pin_today(monkeypatch, month_start - timedelta(days=1))
 
     rec = RecurringTransaction(
         id=uuid.uuid4(), user_id=test_user.id,
@@ -1196,7 +1200,7 @@ async def test_get_recurring_projections(session, test_user, test_workspace):
 
 @pytest.mark.asyncio
 async def test_get_recurring_projections_filters_non_pnl_categories_by_default(
-    session, test_user, test_workspace
+    session, test_user, test_workspace, monkeypatch
 ):
     month_start = date.today().replace(day=1)
     month_end = (
@@ -1204,6 +1208,9 @@ async def test_get_recurring_projections_filters_non_pnl_categories_by_default(
         if month_start.month == 12
         else date(month_start.year, month_start.month + 1, 1)
     )
+    # Fork F-006 (Q12): occurrences count only after today, so today is the eve of this month.
+    pin_today(monkeypatch, month_start - timedelta(days=1))
+
     ignored = Category(
         id=uuid.uuid4(),
         user_id=test_user.id,
@@ -1753,9 +1760,12 @@ async def test_projected_transactions_use_effective_month_without_duplicates(
 
 
 @pytest.mark.asyncio
-async def test_get_summary_includes_recurring_projections(session, test_user, test_workspace):
+async def test_get_summary_includes_recurring_projections(session, test_user, test_workspace, monkeypatch):
     today = date.today()
     month_start = today.replace(day=1)
+
+    # Fork F-006 (Q12): occurrences count only after today, so today is the eve of this month.
+    pin_today(monkeypatch, month_start - timedelta(days=1))
 
     acct = Account(
         id=uuid.uuid4(), user_id=test_user.id, name="Summary Acct",
@@ -1782,9 +1792,12 @@ async def test_get_summary_includes_recurring_projections(session, test_user, te
 
 
 @pytest.mark.asyncio
-async def test_spending_by_category_includes_recurring(session, test_user, test_workspace):
+async def test_spending_by_category_includes_recurring(session, test_user, test_workspace, monkeypatch):
     today = date.today()
     month_start = today.replace(day=1)
+
+    # Fork F-006 (Q12): occurrences count only after today, so today is the eve of this month.
+    pin_today(monkeypatch, month_start - timedelta(days=1))
 
     cat = Category(
         id=uuid.uuid4(), user_id=test_user.id,

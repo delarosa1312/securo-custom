@@ -18,7 +18,12 @@ def _serialize_forecast(r: Any) -> dict[str, Any]:
 
 @tool(
     name="get_cashflow_forecast",
-    description="Simulates day-by-day predictive cashflow and calculates liquidity runway and shortfall risk over 30, 60, or 90 days.",
+    description=(
+        "Simulates day-by-day predictive cashflow and calculates liquidity runway and shortfall risk over 30, 60, or 90 days. "
+        # Fork F-006: what it covers, unlike get_cash_flow (docs/fork/PROJECTIONS.md).
+        "Covers only accounts included in the available balance plus credit card spending (not card debt already "
+        "owed), in the workspace currency, without open invoices, so it can differ from get_cash_flow."
+    ),
     parameters={
         "type": "object",
         "properties": {

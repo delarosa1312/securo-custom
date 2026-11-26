@@ -11,6 +11,8 @@ import { AGING_BUCKETS, displayNumber } from '@/lib/invoice-utils'
 import { sumAccountBalances, getAccountLabel } from '@/lib/account-utils'
 import { formatCurrency } from '@/lib/format'
 import { monthLastDay, shiftMonth } from '@/lib/month-utils'
+import { todayInTimezone } from '@/lib/date-utils'
+import { useEffectiveTimezone } from '@/hooks/use-timezone'
 import { useDisplayLocale, useDateLocale } from '@/hooks/use-display-locale'
 import { usePrivacyMode } from '@/hooks/use-privacy-mode'
 import { useAssistant } from '@/contexts/assistant-context'
@@ -296,10 +298,11 @@ export function UpcomingWidget({ scope }: { scope: DashboardScope }) {
   const locale = useDisplayLocale()
   const dateLocale = useDateLocale()
   const { mask } = usePrivacyMode()
-  const today = new Date()
   const iso = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
-  const from = iso(today)
-  const to = iso(new Date(today.getFullYear(), today.getMonth(), today.getDate() + UPCOMING_DAYS))
+  // Fork F-006: the workspace's today, the day the server projects from, not the browser's.
+  const from = todayInTimezone(useEffectiveTimezone())
+  const [year, month, day] = from.split('-').map(Number)
+  const to = iso(new Date(year, month - 1, day + UPCOMING_DAYS))
   const { data, isLoading, isError, refetch } = useQuery({
     queryKey: ['dashboard', 'projected-transactions', 'upcoming', from],
     queryFn: () => dashboard.projectedTransactions({ from, to }),

@@ -302,7 +302,8 @@ async def test_last_day_of_month_projects_nothing_for_it(session, test_user, tes
     report = await _report(session, test_workspace, test_user, budget_forecast=True)
 
     nov = report.budget_forecast.months[0]
-    assert nov.days == 0 and nov.remaining == Decimal("110.00") and nov.forecast == Decimal("0.00")
+    # Streaming's rule of the 28th is overdue and not a row (Q12): its 30 is remaining budget again, not scheduled.
+    assert nov.days == 0 and nov.remaining == Decimal("140.00") and nov.forecast == Decimal("0.00")
     assert report.budget_forecast.total == Decimal("850.00")
 
 
@@ -379,16 +380,35 @@ async def test_closing_an_account_does_not_change_the_budget_layer(session, test
 
 
 @pytest.mark.asyncio
-async def test_scheduled_refund_does_not_free_budget_until_posted(session, test_user, test_workspace, today):
-    """Known limit (guide): budgets count scheduled debits only, so a pending refund frees budget
-    when it posts, and the end balance drops by that amount at that moment."""
+async def test_scheduled_refund_frees_budget_before_it_posts(session, test_user, test_workspace, today):
+    """Q9 (issue #8): a scheduled credit in a budgeted category is negative scheduled spending, so the
+    projected end balance does not move when the refund posts."""
     acct, restaurants, *_ = await _worked_example(session, test_user, test_workspace)
-    await data.txn(session, test_user, test_workspace, acct, "20", date(2026, 11, 25), "credit", cat=restaurants,
-                   status="pending")
+    refund = await data.txn(session, test_user, test_workspace, acct, "20", date(2026, 11, 25), "credit",
+                            cat=restaurants, status="pending")
+    pending = await _report(session, test_workspace, test_user, budget_forecast=True)
+
+    nov = _category(pending, "2026-11", "Restaurants")
+    assert (nov.posted, nov.scheduled, nov.remaining) == (Decimal("100.00"), Decimal("20.00"), Decimal("130.00"))
+
+    refund.status, refund.date, refund.effective_date = "posted", today, today
+    await session.commit()
+    posted = await _report(session, test_workspace, test_user, budget_forecast=True)
+    nov = _category(posted, "2026-11", "Restaurants")
+    assert (nov.posted, nov.scheduled, nov.remaining) == (Decimal("80.00"), Decimal("40.00"), Decimal("130.00"))
+    assert _breakdown(posted, "endingBalance") == _breakdown(pending, "endingBalance")
+
+
+@pytest.mark.asyncio
+async def test_recurring_refund_frees_budget_in_each_month(session, test_user, test_workspace, today):
+    acct, restaurants, *_ = await _worked_example(session, test_user, test_workspace)
+    await data.recurring(session, test_user, test_workspace, acct, "15", date(2026, 11, 27), cat=restaurants,
+                         txn_type="credit")
     report = await _report(session, test_workspace, test_user, budget_forecast=True)
 
-    nov = _category(report, "2026-11", "Restaurants")
-    assert (nov.posted, nov.scheduled, nov.remaining) == (Decimal("100.00"), Decimal("40.00"), Decimal("110.00"))
+    assert _category(report, "2026-11", "Restaurants").remaining == Decimal("125.00")
+    # December has no spending: net spending never goes below zero, as with a posted refund.
+    assert _category(report, "2026-12", "Restaurants").remaining == Decimal("250.00")
 
 
 @pytest.mark.asyncio
@@ -436,3 +456,58 @@ async def test_composition_splits_the_budget_figure_by_category(session, test_us
 
     filtered = await _report(session, test_workspace, test_user, account_ids=[acct.id], budget_forecast=True)
     assert {c.group for c in filtered.composition if c.key.startswith("budget:")} == {"unallocatedBudget"}
+
+
+@pytest.mark.asyncio
+async def test_a_refund_larger_than_posted_spending_moves_nothing_when_it_posts(
+    session, test_user, test_workspace, today,
+):
+    """Q9: budget 250, posted 100, pending refund 150, monthly rule 80: spending 30 before and after posting."""
+    checking = await data.account(session, test_user, test_workspace)
+    cat = await data.category(session, test_user, test_workspace, "Restaurants")
+    await data.budget(session, test_user, test_workspace, cat, "250")
+    await data.txn(session, test_user, test_workspace, checking, "100", date(2026, 11, 2), cat=cat)
+    refund = await data.txn(session, test_user, test_workspace, checking, "150", date(2026, 11, 25), "credit",
+                            cat=cat, status="pending")
+    await data.recurring(session, test_user, test_workspace, checking, "80", date(2026, 11, 28), cat=cat)
+
+    async def read():
+        rows = await budget_service.get_budget_vs_actual(session, test_workspace.id, test_user.id, date(2026, 11, 1))
+        row = next(r for r in rows if r.category_id == cat.id)
+        report = await get_cash_flow_report(
+            session, test_workspace.id, test_user.id, months=1, interval="daily", budget_forecast=True,
+        )
+        return row.projected_amount, _breakdown(report, "endingBalance")
+
+    before = await read()
+    refund.status, refund.date, refund.effective_date = "posted", today, today
+    await session.commit()
+    after = await read()
+    assert before == after
+    assert before[0] == Decimal("30")
+
+
+@pytest.mark.asyncio
+async def test_an_occurrence_dated_today_or_earlier_counts_only_once_it_is_a_row(
+    session, test_user, test_workspace, today,
+):
+    """Q12: rules due 11-15 and today, never generated, project nothing this month; generated, they count once."""
+    checking = await data.account(session, test_user, test_workspace)
+    cat = await data.category(session, test_user, test_workspace, "Utilities")
+    await data.budget(session, test_user, test_workspace, cat, "250")
+    overdue = await data.recurring(session, test_user, test_workspace, checking, "40", date(2026, 11, 15), cat=cat)
+    due_today = await data.recurring(session, test_user, test_workspace, checking, "25", today, cat=cat)
+    await data.recurring(session, test_user, test_workspace, checking, "10", date(2026, 11, 28), cat=cat)
+
+    async def read():
+        rows = await budget_service.get_budget_vs_actual(session, test_workspace.id, test_user.id, date(2026, 11, 1))
+        row = next(r for r in rows if r.category_id == cat.id)
+        return row.actual_amount, row.projected_amount
+
+    assert await read() == (Decimal("0"), Decimal("10"))
+    for rule, when in ((overdue, date(2026, 11, 15)), (due_today, today)):
+        row = await data.txn(session, test_user, test_workspace, checking, str(rule.amount), when, cat=cat,
+                             source="recurring")
+        row.recurring_transaction_id = rule.id
+    await session.commit()
+    assert await read() == (Decimal("65"), Decimal("75"))

@@ -389,8 +389,12 @@ async def get_budget_vs_actual(
         .group_by(line_category_id())
     )
     spending_map: dict[str, Decimal] = {}
+    # Fork F-006 (Q9): the projection starts from the net, even below zero, and
+    # floors once: a refund then moves nothing when it posts.
+    net_map: dict[str, Decimal] = {}
     for row in spending_result.all():
         net = row[1] or Decimal("0")
+        net_map[str(row[0])] = net
         if net > 0:
             spending_map[str(row[0])] = net
 
@@ -405,6 +409,8 @@ async def get_budget_vs_actual(
         if cat_uuid is None:
             continue
         cat_id = str(cat_uuid)
+        if cat_id in net_map:  # fork F-006 (Q9)
+            net_map[cat_id] -= Decimal(str(total))
         if cat_id in spending_map:
             spending_map[cat_id] -= Decimal(str(total))
             if spending_map[cat_id] <= 0:
@@ -427,20 +433,24 @@ async def get_budget_vs_actual(
             continue
         cat_id = str(cat_uuid)
         spending_map[cat_id] = spending_map.get(cat_id, Decimal("0")) + Decimal(str(total))
+        net_map[cat_id] = net_map.get(cat_id, Decimal("0")) + Decimal(str(total))  # fork F-006 (Q9)
 
-    projected_spending_map = dict(spending_map)
+    projected_spending_map = dict(net_map)  # fork F-006 (Q9): floored once, below
 
     # Add projected recurring transactions for this month (converted to primary currency)
     projections = await _get_recurring_projections(
         session, workspace_id, month_start, month_end, accounting_mode=accounting_mode,
     )
     for proj in projections:
-        if proj["type"] != "debit" or not proj["category_id"]:
+        # Fork F-006 (Q9): a scheduled credit nets against spending, as a posted refund does.
+        if not proj["category_id"]:
             continue
         cat_id = str(proj["category_id"])
         converted, _ = await convert(
             session, Decimal(str(proj["amount"])), proj["currency"], primary_currency,
         )
+        if proj["type"] != "debit":
+            converted = -converted
         projected_spending_map[cat_id] = projected_spending_map.get(cat_id, Decimal("0")) + converted
 
     forecast_transactions = await _get_forecast_transactions(
@@ -451,8 +461,6 @@ async def get_budget_vs_actual(
         session, user_id, forecast_transactions
     )
     for tx in forecast_transactions:
-        if tx.type != "debit":
-            continue
         parts = [part for part in user_pnl_parts(tx) if part[0] is not None]
         if not parts:
             continue
@@ -467,6 +475,8 @@ async def get_budget_vs_actual(
                 session, Decimal(str(abs(tx.amount))), tx.currency, primary_currency,
             )
         converted *= forecast_fractions.get(tx.id, 1)
+        if tx.type != "debit":  # fork F-006 (Q9): a scheduled refund nets
+            converted = -converted
         for part_category_id, _, ratio in parts:
             cat_id = str(part_category_id)
             projected_spending_map[cat_id] = projected_spending_map.get(cat_id, Decimal("0")) + converted * ratio
@@ -504,8 +514,12 @@ async def get_budget_vs_actual(
         .group_by(line_category_id())
     )
     prev_spending_map: dict[str, Decimal] = {}
+    # Fork F-006 (Q9): the projection starts from the net, even below zero, and
+    # floors once: a refund then moves nothing when it posts.
+    prev_net_map: dict[str, Decimal] = {}
     for row in prev_spending_result.all():
         net = row[1] or Decimal("0")
+        prev_net_map[str(row[0])] = net
         if net > 0:
             prev_spending_map[str(row[0])] = net
 
@@ -519,6 +533,8 @@ async def get_budget_vs_actual(
         if cat_uuid is None:
             continue
         cat_id = str(cat_uuid)
+        if cat_id in prev_net_map:  # fork F-006 (Q9)
+            prev_net_map[cat_id] -= Decimal(str(total))
         if cat_id in prev_spending_map:
             prev_spending_map[cat_id] -= Decimal(str(total))
             if prev_spending_map[cat_id] <= 0:
@@ -537,20 +553,24 @@ async def get_budget_vs_actual(
             continue
         cat_id = str(cat_uuid)
         prev_spending_map[cat_id] = prev_spending_map.get(cat_id, Decimal("0")) + Decimal(str(total))
+        prev_net_map[cat_id] = prev_net_map.get(cat_id, Decimal("0")) + Decimal(str(total))  # fork F-006 (Q9)
 
-    projected_prev_spending_map = dict(prev_spending_map)
+    projected_prev_spending_map = dict(prev_net_map)  # fork F-006 (Q9): floored once, below
 
     # Add projected recurring transactions for previous month (converted to primary currency)
     prev_projections = await _get_recurring_projections(
         session, workspace_id, prev_month_start, prev_month_end, accounting_mode=accounting_mode,
     )
     for proj in prev_projections:
-        if proj["type"] != "debit" or not proj["category_id"]:
+        # Fork F-006 (Q9): a scheduled credit nets against spending, as a posted refund does.
+        if not proj["category_id"]:
             continue
         cat_id = str(proj["category_id"])
         converted, _ = await convert(
             session, Decimal(str(proj["amount"])), proj["currency"], primary_currency,
         )
+        if proj["type"] != "debit":
+            converted = -converted
         projected_prev_spending_map[cat_id] = projected_prev_spending_map.get(cat_id, Decimal("0")) + converted
 
     prev_forecast_transactions = await _get_forecast_transactions(
@@ -561,8 +581,6 @@ async def get_budget_vs_actual(
         session, user_id, prev_forecast_transactions
     )
     for tx in prev_forecast_transactions:
-        if tx.type != "debit":
-            continue
         parts = [part for part in user_pnl_parts(tx) if part[0] is not None]
         if not parts:
             continue
@@ -577,6 +595,8 @@ async def get_budget_vs_actual(
                 session, Decimal(str(abs(tx.amount))), tx.currency, primary_currency,
             )
         converted *= prev_forecast_fractions.get(tx.id, 1)
+        if tx.type != "debit":  # fork F-006 (Q9): a scheduled refund nets
+            converted = -converted
         for part_category_id, _, ratio in parts:
             cat_id = str(part_category_id)
             projected_prev_spending_map[cat_id] = projected_prev_spending_map.get(cat_id, Decimal("0")) + converted * ratio

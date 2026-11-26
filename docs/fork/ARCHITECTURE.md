@@ -10,23 +10,16 @@ projection code is laid out at `v0.22.0`, where fork code goes, and which files 
 | Engine | Entry point | Used by | Combines | Leaves out |
 | --- | --- | --- | --- | --- |
 | Cash Flow report | `report_service.get_cash_flow_report` (`GET /api/reports/cash-flow`) | Reports page, MCP `get_cash_flow` | balance at today (all open account types), posted flows, pending and future rows, recurring occurrences, invoice claims; `baseline=true` replaces recurring with a daily mean of up to 12 months | budgets; transfers in the flow bars |
-| Predictive cash flow | `cashflow_forecast_service.generate_cashflow_forecast` (`GET /api/forecast/cashflow`) | MCP `get_cashflow_forecast` only, no screen | liquid balance (checking, savings, wallet), manual and detected recurring, 90-day discretionary burn | pending rows, installments, invoice claims, budgets, collections, accounting mode |
+| Predictive cash flow | `cashflow_forecast_service.generate_cashflow_forecast` (`GET /api/forecast/cashflow`) | MCP `get_cashflow_forecast` only, no screen | liquid balance (checking, savings, wallet), manual and detected recurring, 90-day discretionary burn; since F-006 pending and future-dated rows on included accounts and cards | invoice claims, budgets, collections, accounting mode |
 | Budget forecast | `budget_service.get_multi_month_forecast` (`GET /api/budgets/forecast`) | no screen | budget minus posted and recurring spend per month | history; balances |
 
 Shared helpers sit in `dashboard_service.py`: `_get_recurring_projections`, `_dated_occurrences`,
 `_materialized_recurring_occurrences`, `_get_forecast_transactions`, `_balance_at`, `_total_balance_by_currency`.
 Occurrence expansion is `recurring_transaction_service.get_occurrences_in_range` with a `[start, end)` window.
 The dashboard projection, the balance-history chart, Upcoming (`get_projected_transactions`) and the calendar
-(`transaction_calendar_service`) each assemble these differently. Known differences (F-006 works from this list):
-
-- Opening balance: calendar includes pending rows; dashboard and Cash Flow report are posted-only.
-- Calendar's `_project_recurring_items` does not remove occurrences that already exist as rows.
-- Transfer-like recurring rules: in dashboard balance, Upcoming and calendar; not in the Cash Flow walk.
-- Accounts counted: Cash Flow anchor takes every open type; balance history drops loans; predictive takes liquid.
-- Currency: predictive uses the workspace default currency, the rest use the user's primary currency; five
-  different FX fallbacks.
-- Window edges: `to` inclusive in Upcoming, `[start, end)` in helpers, today included in predictive only.
-- Cash Flow report returns `float`.
+(`transaction_calendar_service`) each assemble these differently. Since F-006 (#8) they reconcile to the cent
+where they describe the same thing; `PROJECTIONS.md` is the comparison, the kept differences and the tests.
+The Cash Flow report still returns `float`.
 
 ### Accounts, available balance, collections
 

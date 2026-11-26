@@ -56,5 +56,9 @@
     "unallocatedBudget": "Unallocated Budget",
     "budget_outflow": "Budgeted spending",
     "range24m": "24M"
+  },
+  "projections": {
+    "invoiceExpected": "Invoice {{number}} (expected)",
+    "invoiceExpectedNoNumber": "Invoice (expected)"
   }
 }

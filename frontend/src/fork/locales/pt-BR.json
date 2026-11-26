@@ -56,5 +56,9 @@
     "unallocatedBudget": "Orçamento Não Alocado",
     "budget_outflow": "Gastos orçados",
     "range24m": "24M"
+  },
+  "projections": {
+    "invoiceExpected": "Cobrança {{number}} (prevista)",
+    "invoiceExpectedNoNumber": "Cobrança (prevista)"
   }
 }

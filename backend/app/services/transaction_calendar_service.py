@@ -121,6 +121,15 @@ async def get_transaction_calendar(
                 session, tx, primary_currency
             )
 
+    # Fork F-006: real forecast rows move the balance on their own date (overdue
+    # pending rows from tomorrow), whatever date basis lists them.
+    from app.fork import projection_consistency as fork_projection
+    seed_delta, forecast_deltas = await fork_projection.calendar_row_moves(
+        session, workspace_id, app_today(), grid_start, grid_end, requested_account_ids,
+        lambda tx: _signed_balance_delta_primary(session, tx, primary_currency),
+    )
+    start_balance += seed_delta
+
     actual_rows = await _load_actual_transactions(
         session,
         workspace_id,
@@ -183,7 +192,6 @@ async def get_transaction_calendar(
         range_date_col=activity_date_col,
         future_date_col=Transaction.date,
     )
-    forecast_deltas: dict[date, float] = {}
     for tx in forecast_rows:
         activity_date = _activity_date(tx, date_basis, accounting_mode)
         if activity_date not in days:
@@ -214,14 +222,6 @@ async def get_transaction_calendar(
         day.items.append(
             _forecast_item(tx, activity_date, amount_primary, is_transfer, ignored)
         )
-
-        # Forecast rows are excluded from actual deltas but included in the
-        # projected walk. The seed already contains forecast rows before the
-        # grid; rows inside the grid are applied here.
-        if not ignored:
-            forecast_deltas[tx.date] = forecast_deltas.get(tx.date, 0.0) + await _signed_balance_delta_primary(
-                session, tx, primary_currency
-            )
 
     projected_items, projected_deltas, carried_projected_delta = await _project_recurring_items(
         session,
@@ -260,6 +260,24 @@ async def get_transaction_calendar(
 
     for delta_date, delta in projected_deltas.items():
         balance_deltas[delta_date] = balance_deltas.get(delta_date, 0.0) + delta
+    # Fork F-006: open invoice claims, as the dashboard card and Cash Flow count them.
+    if requested_account_ids is None:
+        claims_seed, claims = await fork_projection.calendar_claim_moves(
+            session, workspace_id, app_today(), grid_start, grid_end, primary_currency,
+        )
+        start_balance += claims_seed
+        for due, signed, claim_item in claims:
+            balance_deltas[due] = balance_deltas.get(due, 0.0) + signed
+            days[due].projected_count += 1
+            days[due].items.append(claim_item)
+            if signed > 0:
+                days[due].income += signed
+                days[due].projected_income += signed
+                days[due].has_income = True
+            else:
+                days[due].expense -= signed
+                days[due].projected_expense -= signed
+                days[due].has_expense = True
     for delta_date, delta in forecast_deltas.items():
         balance_deltas[delta_date] = balance_deltas.get(delta_date, 0.0) + delta
 
@@ -544,7 +562,9 @@ def _forecast_item(
     )
 
 
-def _count_occurrences_before(recurring: RecurringTransaction, end: date) -> int:
+def _count_occurrences_before(
+    recurring: RecurringTransaction, end: date, skip: frozenset[date] = frozenset(),
+) -> int:
     """Count still-virtual effective occurrences before ``end`` without truncating."""
     nominal_start = recurring.next_occurrence
     first_effective = adjust_weekend_date(
@@ -573,7 +593,7 @@ def _count_occurrences_before(recurring: RecurringTransaction, end: date) -> int
             intended_day=recurring.day_of_month or recurring.start_date.day,
             weekend_adjustment=recurring.weekend_adjustment,
         )
-        count += len(occurrences)
+        count += sum(1 for occurrence in occurrences if occurrence not in skip)
         range_start = chunk_end
     return count
 
@@ -610,10 +630,17 @@ async def _project_recurring_items(
     recurring_rows = await fork_transfers.expand_legs(
         session, list(result.scalars().all()), account_ids
     )
+    # Fork F-006: an occurrence that already exists as a row counts as that row.
+    from app.services.dashboard_service import _materialized_recurring_occurrences
+    materialized = await _materialized_recurring_occurrences(
+        session, workspace_id, {rec.id for rec in recurring_rows},
+        min((rec.next_occurrence for rec in recurring_rows), default=start) - timedelta(days=3), end,
+    )
 
     items: list[tuple[TransactionCalendarItem, float, list[tuple[bool, float]]]] = []
     deltas: dict[date, float] = {}
     carried_delta = 0.0
+    tomorrow = app_today() + timedelta(days=1)
     for rec in recurring_rows:
         if rec.account_id is None:
             continue
@@ -651,8 +678,13 @@ async def _project_recurring_items(
         else:
             parts = [(is_transfer, 1.0)]
         if not is_ignored:
-            carried_delta += _count_occurrences_before(rec, start) * signed_delta
+            skip = frozenset(day for rec_id, day in materialized if rec_id == rec.id)
+            # Fork F-006 (Q12): an occurrence dated today or earlier counts only once it is a row.
+            carried = _count_occurrences_before(rec, start, skip) - _count_occurrences_before(rec, tomorrow, skip)
+            carried_delta += max(carried, 0) * signed_delta
         for occ_date in occurrences:
+            if (rec.id, occ_date) in materialized or occ_date < tomorrow:
+                continue
             item = TransactionCalendarItem(
                 kind="projected",
                 recurring_id=rec.id,

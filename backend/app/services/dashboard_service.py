@@ -195,6 +195,9 @@ async def _get_recurring_projections(
     )
     if account_ids:
         stmt = stmt.where(fork_transfers.touches_accounts(account_ids))  # fork F-004
+    # Fork F-006: like forecast rows, nothing projects from a closed account.
+    from app.fork.projection_consistency import on_open_account
+    stmt = on_open_account(stmt)
     result = await session.execute(stmt)
     # Fork F-004: a transfer schedule reads as its two legs here, or not at all in P&L views.
     recurring_list = await fork_transfers.expand_legs(
@@ -222,6 +225,7 @@ async def _get_recurring_projections(
     )
 
     projections = []
+    today = app_today()
     for rec in recurring_list:
         # Compute occurrences from the nominal pointer; linked rows are
         # filtered explicitly below because the pointer can lag materialization.
@@ -243,6 +247,8 @@ async def _get_recurring_projections(
         )
         for occ_date, report_date in occurrences:
             if (rec.id, occ_date) in materialized_occurrences:
+                continue
+            if occ_date <= today:  # fork F-006 (Q12): counts only once it is a row
                 continue
             for part_category_id, part_amount in parts:
                 projections.append({
@@ -1295,6 +1301,8 @@ async def get_projected_transactions(
     )
     if account_id is not None:
         stmt = stmt.where(fork_transfers.touches_accounts([account_id]))  # fork F-004
+    from app.fork.projection_consistency import on_open_account  # fork F-006
+    stmt = on_open_account(stmt)
     result = await session.execute(stmt)
     # Fork F-004: a transfer schedule is listed as its two legs (one per account).
     recurring_list = await fork_transfers.expand_legs(
@@ -2074,11 +2082,20 @@ async def get_balance_history(
             for tx in carried_forecasts:
                 if tx.is_ignored or (tx.category and tx.category.is_ignored):
                     continue
-                if tx.account and tx.account.connection_id and tx.status == "pending" and tx.date <= today:
+                if (
+                    tx.account and tx.account.connection_id and tx.status == "pending" and tx.date <= today
+                    and tx.source != "recurring"  # fork F-006: our placeholder is not in the provider's figure
+                ):
                     continue
                 current_start += await _signed_forecast_amount_primary(
                     session, tx, primary_currency
                 )
+            # Fork F-006: and the schedules and claims due before that month.
+            from app.fork.projection_consistency import scheduled_balance_moves
+            current_start += sum((await scheduled_balance_moves(
+                session, workspace_id, today + timedelta(days=1), month_start, account_ids,
+                primary_currency, skip_account_ids=loan_ids,
+            )).values())
 
         proj_start = max(month_start, today + timedelta(days=1))
         forecast_transactions = await _get_forecast_transactions(
@@ -2102,19 +2119,13 @@ async def get_balance_history(
             )
             proj_deltas[tx.date.day] = proj_deltas.get(tx.date.day, 0) + float(converted)
 
-        projections = await _get_recurring_projections(
-            session, workspace_id, proj_start, month_end, account_ids
-        )
-        for proj in projections:
-            if proj["account_id"] in loan_ids:
-                continue
-            day = proj["date"].day
-            proj_converted, _ = await convert(
-                session, Decimal(str(proj["amount"])), proj["currency"], primary_currency,
-            )
-            amount = float(proj_converted)
-            signed = amount if proj["type"] == "credit" else -amount
-            proj_deltas[day] = proj_deltas.get(day, 0) + signed
+        # Fork F-006: the card's virtual moves (transfer-like rules, claims).
+        from app.fork.projection_consistency import scheduled_balance_moves
+        for move_date, signed in (await scheduled_balance_moves(
+            session, workspace_id, proj_start, month_end, account_ids,
+            primary_currency, skip_account_ids=loan_ids,
+        )).items():
+            proj_deltas[move_date.day] = proj_deltas.get(move_date.day, 0) + signed
 
     # Build current month daily balances
     current_daily = []

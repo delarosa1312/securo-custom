@@ -169,8 +169,9 @@ async def test_closed_destination_projects_nothing(session, test_user, test_work
 
 
 @pytest.mark.asyncio
-async def test_cash_flow_report_is_as_without_the_schedule(session, test_user, test_workspace):
-    """The Cash Flow report leaves transfers out, as it leaves out pending transfer pairs."""
+async def test_cash_flow_report_moves_balances_not_pnl(session, test_user, test_workspace):
+    """The Cash Flow report keeps transfers out of income and expenses; its balance walk moves each
+    account by its leg (F-006), so all accounts read as without the schedule and Checking ends lower."""
     checking, _, rec = await _setup(session, test_user, test_workspace)
 
     async def reports():
@@ -187,7 +188,15 @@ async def test_cash_flow_report_is_as_without_the_schedule(session, test_user, t
     with_schedule = await reports()
     rec.is_active = False
     await session.commit()
-    assert with_schedule == await reports()
+    without = await reports()
+    assert with_schedule[0] == without[0]
+
+    def figures(report):
+        return {b["key"]: b["value"] for b in report["summary"]["breakdowns"]}
+
+    legs = sum(1 for p in with_schedule[1]["trend"] if p["date"] > app_today().strftime("%Y-%m"))
+    assert figures(with_schedule[1])["projectedExpenses"] == figures(without[1])["projectedExpenses"] == 0
+    assert figures(with_schedule[1])["endingBalance"] == figures(without[1])["endingBalance"] - 200 * legs
 
 
 @pytest.mark.asyncio
