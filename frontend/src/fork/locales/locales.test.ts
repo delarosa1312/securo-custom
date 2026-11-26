@@ -40,4 +40,8 @@ describe('fork locale bundles (D-004)', () => {
     // Upstream keys are still there next to ours.
     expect(Object.keys(i18n.getResourceBundle('en', 'translation')).length).toBeGreaterThan(1)
   })
+
+  it('never use an em dash or en dash', () => {
+    for (const value of [...enKeys.values(), ...ptKeys.values()]) expect(value).not.toMatch(/[\u2013\u2014]/)
+  })
 })

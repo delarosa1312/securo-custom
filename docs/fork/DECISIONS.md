@@ -75,6 +75,18 @@ live in `fork/e2e/` with their own `package.json` (Playwright, the machine's Chr
 stays upstream's. A scenario drives the screen, calls REST and calls MCP as an external client, and saves
 screenshots and JSON responses as evidence.
 
+## D-009 Fork fields on an upstream response only when a fork option is on (2026-11-26, #5)
+
+The budget-aware Cash Flow mode adds a trend figure, a summary figure and an explanation block to
+`GET /api/reports/cash-flow`. Adding optional fields to upstream's `ReportResponse` would put `null` keys in every
+response with the mode off. Instead the fork returns `CashFlowBudgetResponse`, a subclass of `ReportResponse`, only
+when `budget_forecast=true`, and the route's response model is the union of both; with the option off the body is
+upstream's byte for byte (tested). Query limits stay upstream's without the option (`months` 12, upstream's exact
+422), wider only with it (24). Later fork options on upstream reports (F-003, F-006) follow the same pattern.
+Known edges: the route's OpenAPI advertises `months` up to 24 and a union response for every caller, and when
+`months` is out of range together with another invalid parameter the 422 lists only the other one (upstream lists
+both); a request with only `months` out of range gets upstream's exact body.
+
 ## D-010 F-001: the dashboard keeps computing Available balance in the browser (2026-11-26)
 
 Upstream sums the headline from `GET /api/accounts` in the browser. F-001 keeps that and adds one predicate to the

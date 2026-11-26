@@ -11,5 +11,29 @@
       "include": "Incluir {{name}} no saldo disponível.",
       "leaveOut": "Deixar {{name}} fora do saldo disponível. A conta continua no saldo total, no patrimônio líquido e nos relatórios."
     }
+  },
+  "budgetForecast": {
+    "toggle": "Incluir orçamentos",
+    "toggleHelp": "Soma o que resta de cada orçamento mensal como gasto previsto, distribuído igualmente por dia (no mês atual, a partir de amanhã). Orçamentos não têm conta: com filtro de conta ou coleção, o valor aparece à parte e não é descontado do saldo. Ainda não pode ser combinado com Incluir estimativa.",
+    "panelTitle": "De onde vêm os gastos orçados",
+    "introSubtracted": "O que resta de cada orçamento mensal (orçamento menos lançado menos agendado, nunca abaixo de zero) entra como gasto e é descontado do saldo projetado.",
+    "introUnallocated": "Orçamentos não têm conta: com filtro de conta ou coleção, este valor aparece à parte e não é descontado do saldo.",
+    "category": "Categoria",
+    "budget": "Orçamento",
+    "posted": "Lançado",
+    "scheduled": "Agendado",
+    "remaining": "Restante",
+    "forecast": "Na projeção",
+    "total": "Total",
+    "spread": "Distribuído igualmente por dia de {{from}} a {{to}}",
+    "noDaysLeft": "Sem dias restantes no mês: não projetado",
+    "empty": "Nenhum orçamento no período. Defina orçamentos na página Orçamentos para incluí-los aqui.",
+    "slice": "{{name}} · orçamento"
+  },
+  "reports": {
+    "budgetExpenses": "Gastos Orçados",
+    "unallocatedBudget": "Orçamento Não Alocado",
+    "budget_outflow": "Gastos orçados",
+    "range24m": "24M"
   }
 }

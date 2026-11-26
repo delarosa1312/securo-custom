@@ -52,6 +52,14 @@ other report. Cards, loans and investments are never available money; closed acc
 current account 500, cash 100, reserve 1,000 switched off, card owing 300: available 600, after paying the card
 200, total balance 1,300.
 
+The budget-aware Cash Flow mode (F-002, "Include budgets") is off by default and changes only the Cash Flow
+report (screen, `GET /api/reports/cash-flow?budget_forecast=true`, MCP `get_cash_flow`). Each budgeted category's
+remaining budget is spread evenly per day (this month from tomorrow, later months over all their days) and
+subtracted from the projected balance with all accounts; with an account or collection filter it is shown apart
+as "Unallocated Budget". It excludes "Include estimate" and alone offers 24 months. Example: restaurant budget 250,
+posted 100, pending 40 on the 25th, today the 20th of a 30-day month: 110 more spending, 11.00 a day from the 21st.
+Transition from provision schedules: `docs/fork/guides/provisions-to-budgets.md`.
+
 Three layers a projection may combine, each at most once per unit of spending:
 
 1. Scheduled: pending rows, future-dated rows, installments, recurring occurrences.

@@ -1607,6 +1607,7 @@ async def get_cash_flow_report(
     currency: str = "USD",
     baseline: bool = False,
     account_ids: Optional[list[uuid.UUID]] = None,
+    budget_forecast: bool = False,
 ) -> ReportResponse:
     """Cash flow chart with a short past window plus a forward projection.
 
@@ -1879,6 +1880,15 @@ async def get_cash_flow_report(
                 claim.due_date, abs(claim_primary), claim.direction == "receivable"
             )
 
+    # Fork F-002: remaining budgets as virtual daily spending (app/fork).
+    budget_plan = None
+    if budget_forecast:
+        from app.fork.budget_forecast_service import build_budget_forecast
+        budget_plan = await build_budget_forecast(session, workspace_id, user_id, today, end)
+        if account_ids is None:
+            for budget_day, budget_amount in budget_plan.daily.items():
+                _add_balance_flow(budget_day, float(budget_amount), False)
+
     # 4. Walk day-by-day. The actual section is anchored at today's
     # authoritative balance. The forward projected section starts from that
     # balance plus pending payables already dated today or earlier.
@@ -2050,7 +2060,11 @@ async def get_cash_flow_report(
             group=group,
         ))
 
-    return ReportResponse(
+    response = ReportResponse(
         summary=summary, trend=trend, meta=meta,
         composition=composition, category_trend=[],
     )
+    if budget_plan is not None:
+        from app.fork.budget_forecast_service import attach_budget_forecast
+        return attach_budget_forecast(response, budget_plan, account_ids is None, interval)
+    return response
