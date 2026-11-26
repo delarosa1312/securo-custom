@@ -19,4 +19,5 @@ from mcp_server.tools import (  # noqa: F401
     transfers,
     fork_accounts,  # fork F-001
     fork_recurring_transfers,  # fork F-004
+    fork_recurring_lifecycle,  # fork F-005
 )
