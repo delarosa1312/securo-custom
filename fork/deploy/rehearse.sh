@@ -26,6 +26,7 @@ api="http://127.0.0.1:${REHEARSAL_BACKEND_PORT:-28000}"
 
 compose() {
   local files=() phase tag file custom_tag=()
+  [[ -f $phase_file ]] || { echo "no rehearsal running: start with 'stock' or 'custom'" >&2; exit 1; }
   read -r phase tag file <"$phase_file"
   case "$phase" in
     stock) files=(-f "$state_dir/stock-$tag.yml" -f "$state_dir/stock-images-$tag.yml") ;;
@@ -33,6 +34,7 @@ compose() {
   esac
   # Scrubbed environment, as fork/tools/stack.sh: no host variable reaches the stack.
   env -i PATH="$PATH" HOME="$HOME" ${DOCKER_HOST:+DOCKER_HOST="$DOCKER_HOST"} \
+    ${DOCKER_CONTEXT:+DOCKER_CONTEXT="$DOCKER_CONTEXT"} ${XDG_RUNTIME_DIR:+XDG_RUNTIME_DIR="$XDG_RUNTIME_DIR"} \
     "${custom_tag[@]}" \
     docker compose -p "$project" --project-directory "$state_dir" "${files[@]}" \
     -f "$root/fork/deploy/rehearsal.override.yml" "$@"
@@ -101,6 +103,9 @@ EOF
     ;;
   restore)
     label="${1:?restore LABEL}"
+    for f in "$out/$label.dump" "$out/$label"-{attachments,agent_knowledge}.tgz; do
+      [[ -f $f ]] || { echo "no backup file $f" >&2; exit 1; }
+    done
     compose stop migrate backend celery-worker celery-beat mcp-server frontend
     docker exec "$db" dropdb -U postgres --force securo
     docker exec "$db" createdb -U postgres securo
@@ -116,11 +121,20 @@ EOF
     ;;
   stop-app) compose stop migrate backend celery-worker celery-beat mcp-server frontend ;;
   ps) compose ps -a --format 'table {{.Service}}\t{{.Image}}\t{{.Status}}' ;;
-  stats) docker stats --no-stream --format 'table {{.Name}}\t{{.MemUsage}}\t{{.CPUPerc}}' $(docker ps -q --filter "label=com.docker.compose.project=$project") ;;
+  stats)
+    ids=$(docker ps -q --filter "label=com.docker.compose.project=$project")
+    [[ -n $ids ]] || { echo "no rehearsal containers running" >&2; exit 1; }
+    # shellcheck disable=SC2086
+    docker stats --no-stream --format 'table {{.Name}}\t{{.MemUsage}}\t{{.CPUPerc}}' $ids
+    ;;
   logs) compose logs --tail 100 "$@" ;;
   down)
-    [[ -f $phase_file ]] && compose down -v --remove-orphans
+    if [[ -f $phase_file ]]; then
+      compose down -v --remove-orphans
+    else
+      docker compose -p "$project" down -v --remove-orphans
+    fi
     rm -f "$phase_file"
     ;;
-  *) sed -n '2,18p' "$0" >&2; exit 2 ;;
+  *) sed -n '2,16p' "$0" >&2; exit 2 ;;
 esac

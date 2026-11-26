@@ -57,6 +57,10 @@ expect "record: first release rolls back to stock" 0 'downgrade fork@f000`; `ale
   "$record" v0.22.0-custom.1 --commit HEAD
 # A previous release at the same fork head: no migration, switch the tag.
 git tag v0.22.0-custom.1 HEAD
+git tag v0.23.0-custom.1 HEAD
+expect "record: an older base is not the newest" 0 '^false$' -- "$record" v0.22.0-custom.5 --is-newest
+expect "record: a newer base is the newest" 0 '^true$' -- "$record" v0.23.0-custom.2 --is-newest
+git tag -d v0.23.0-custom.1 >/dev/null
 git commit -q --allow-empty -m "synthetic: a release without a migration"
 git update-ref refs/remotes/origin/main HEAD
 expect "record: no migration since the previous release" 0 'No migration since the previous release' -- \

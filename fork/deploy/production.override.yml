@@ -2,7 +2,7 @@
 # Every service that runs backend code takes the same backend image and tag, so they never disagree about the
 # migration heads. SECURO_CUSTOM_TAG is required (for example v0.22.0-custom.1): never `latest`.
 # Compose CLI: docker compose -f docker-compose.prod.yml -f fork/deploy/production.override.yml ...
-# Coolify takes one file: fork/deploy/coolify/production.yml, rendered from this one by fork/deploy/render.sh.
+# Coolify takes one file: fork/deploy/coolify/production.yml, rendered from this one by fork/deploy/render.py.
 x-custom-backend: &custom-backend
   image: ghcr.io/delarosa1312/securo-backend:${SECURO_CUSTOM_TAG:?}
 

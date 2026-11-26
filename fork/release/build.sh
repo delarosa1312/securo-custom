@@ -8,12 +8,14 @@
 #   --commit     what to build; default the commit the tag <version> points to. With --push the tag must
 #                exist and point to it.
 #   --push       build every platform and push to the registry (CI, on a release tag)
-#   --load       build one platform and load it into the local Docker (default; local proof and rehearsal)
+#   --load       build one platform and load it into the local Docker (default; local proof and rehearsal),
+#                tagged <version>-local so it never stands in for the published image
 #   --check      build every platform, keep nothing (CI dry run)
 #   --platforms  default linux/amd64,linux/arm64 for --push and --check, the host platform for --load
 # Environment: FORK_IMAGE_PREFIX (default ghcr.io/delarosa1312), FORK_IMAGE_SUFFIX (appended to the local tag
-# with --load, for example -local), FORK_RELEASE_OUT (where images.env is written, default the current folder),
+# with --load, default -local), FORK_RELEASE_OUT (where images.env is written, default the current folder),
 # FORK_RELEASE_BASE_REF (the branch releases come from, default origin/main).
+# A published version is immutable: --push refuses a version whose image already exists in the registry.
 # Takes the heavy lock of fork/tools/test.sh and stack.sh, so it never builds alongside another heavy run.
 set -euo pipefail
 root="$(git -C "$(dirname "$0")" rev-parse --show-toplevel)"
@@ -63,11 +65,18 @@ case "$mode" in
     platforms="${platforms:-linux/$(docker version --format '{{.Server.Arch}}')}"
     [[ $platforms != *,* ]] || die "--load takes one platform"
     output=(--load)
-    tag_suffix="${FORK_IMAGE_SUFFIX:-}"
+    tag_suffix="${FORK_IMAGE_SUFFIX--local}"
     ;;
   push) platforms="${platforms:-linux/amd64,linux/arm64}"; output=(--push); tag_suffix="" ;;
   check) platforms="${platforms:-linux/amd64,linux/arm64}"; output=(--output type=cacheonly); tag_suffix="" ;;
 esac
+
+if [[ $mode == push ]]; then
+  for name in backend frontend; do
+    ! docker buildx imagetools inspect "$prefix/securo-$name:$version" >/dev/null 2>&1 ||
+      die "$prefix/securo-$name:$version is already published; a version is never rebuilt, cut the next one"
+  done
+fi
 
 state_dir="${XDG_CACHE_HOME:-$HOME/.cache}/securo-custom"
 tmp_root="${FORK_RELEASE_TMP:-${RUNNER_TEMP:-$state_dir}}"

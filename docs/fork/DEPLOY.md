@@ -54,9 +54,14 @@ know. An image and a database that disagree fail closed (rehearsed, step 4 below
 5. Commit the record: `fork/release/record.py <version> --registry > docs/fork/releases/<version>.md` (digests
    read anonymously from GHCR), in a small pull request.
 
-Dry run: Actions > Fork release > Run workflow (branch `main`, a version label) builds both images for both
-architectures and publishes nothing. Locally: `FORK_IMAGE_SUFFIX=-local fork/release/build.sh <version> --commit
-HEAD` builds and loads the host's architecture under `...:<version>-local`.
+A version is immutable: the workflow refuses a version that already has a release, and `build.sh --push` one
+whose images are already in GHCR; a failed or wrong release is followed by the next number. The GitHub release
+is marked latest only when no tagged custom version sorts above it.
+
+Dry run: Actions > Fork release > Run workflow (any branch, a version label) builds both images for both
+architectures with read-only permissions and publishes nothing. Locally: `fork/release/build.sh <version> --commit
+HEAD` builds and loads the host's architecture as `...:<version>-local`, a tag that never stands in for the
+published one.
 
 ### Release record
 

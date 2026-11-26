@@ -6,6 +6,7 @@ It holds the upstream base, the source commit, both migration heads, the previou
 back to it, the patch list from the inventory in `docs/fork/UPSTREAM.md`, and the image digests.
 
 Usage: record.py <version> [--commit REV] [--images-env FILE] [--registry]
+       record.py <version> --is-newest   true when no tagged custom version sorts above <version>
   --images-env  the images.env written by build.sh (digests of the images just pushed)
   --registry    read the digests from the registry instead (anonymous; the packages must be public)
 Stdlib only.
@@ -69,6 +70,10 @@ def fork_head(commit: str) -> str | None:
     if not git_ok("cat-file", "-e", f"{commit}:backend/alembic/fork_versions"):
         return None
     found = heads(commit, "backend/alembic/fork_versions")
+    if len(found) > 1:
+        raise SystemExit(
+            f"record.py: the fork line has several heads at {commit}: {', '.join(found)}"
+        )
     return found[0] if found else None
 
 
@@ -84,6 +89,8 @@ def previous_release(version: str, commit: str) -> str | None:
 
 def patch_list(commit: str) -> list[tuple[str, str]]:
     text = git("show", f"{commit}:docs/fork/UPSTREAM.md")
+    if "## Patch inventory" not in text:
+        raise SystemExit("record.py: docs/fork/UPSTREAM.md has no '## Patch inventory' section")
     section = text.split("## Patch inventory", 1)[1].split("\n## ", 1)[0]
     rows = []
     for line in section.splitlines():
@@ -153,6 +160,11 @@ def main() -> int:
     parser.add_argument("--commit")
     parser.add_argument("--images-env", type=Path)
     parser.add_argument("--registry", action="store_true")
+    parser.add_argument(
+        "--is-newest",
+        action="store_true",
+        help="print true when no tagged custom version sorts above it",
+    )
     args = parser.parse_args()
 
     m = VERSION_RE.match(args.version)
@@ -163,6 +175,10 @@ def main() -> int:
         )
         return 2
     version = args.version
+    if args.is_newest:
+        tags = [t for t in git("tag", "--list", "v*-custom.*").splitlines() if VERSION_RE.match(t)]
+        print(str(all(version_key(t) <= version_key(version) for t in tags)).lower())
+        return 0
     upstream_base = f"v{m[1]}"
     commit = git("rev-parse", "--verify", f"{args.commit or 'refs/tags/' + version}^{{commit}}")
     previous = previous_release(version, commit)

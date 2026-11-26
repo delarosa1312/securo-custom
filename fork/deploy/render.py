@@ -15,6 +15,7 @@ Needs `docker compose` and PyYAML.
 
 from __future__ import annotations
 
+import argparse
 import os
 import subprocess
 import sys
@@ -42,6 +43,9 @@ def render(name: str, overrides: list[str]) -> str:
         [
             "docker",
             "compose",
+            # Never the worktree's .env: COMPOSE_* keys in it could change the output.
+            "--env-file",
+            "/dev/null",
             "-p",
             "securo",
             "--project-directory",
@@ -75,7 +79,9 @@ def render(name: str, overrides: list[str]) -> str:
 
 
 def main() -> int:
-    check = "--check" in sys.argv[1:]
+    parser = argparse.ArgumentParser(description="Render fork/deploy/coolify/*.yml")
+    parser.add_argument("--check", action="store_true", help="fail when a rendered file is stale")
+    check = parser.parse_args().check
     stale = []
     for name, overrides in OUTPUTS.items():
         target = DEPLOY / "coolify" / f"{name}.yml"
