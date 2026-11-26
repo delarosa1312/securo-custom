@@ -83,10 +83,9 @@ redoes the merge, refuses unless the tree equals the one `check` tested, then pu
 (`--apply --checks-from`). The tool also keeps tokens out of the environment of every command that runs upstream
 code, and its pushes never carry tags (`--no-follow-tags`).
 
-Pull requests by the workflow: GitHub lets `GITHUB_TOKEN` open a pull request only when the repository setting
-"Allow GitHub Actions to create and approve pull requests" (Settings, Actions, General, Workflow permissions) is
-on; it is off here (checked 2026-11-26). While it is off, a clean sync pushes `sync/<tag>` and opens an issue with
-the link that opens the pull request in one click; the next run adopts that pull request and closes the issue.
+Pull requests by the workflow: the default token cannot open one here (see Repository settings below), so a clean
+sync pushes `sync/<tag>` and opens an issue with the link that opens the pull request in one click; the next run
+adopts that pull request, fills in its description and closes the issue.
 
 Token for pushes: GitHub refuses a push by the
 default `GITHUB_TOKEN` that creates or updates a file under `.github/workflows/`, and upstream changed its workflow
@@ -113,9 +112,33 @@ put in code (code spans stay as they are), so it pings nobody, links none of our
 cross-reference on upstream. Tool output is quoted in fenced blocks. The tool refuses to run against
 `securo-finance/securo`. Nothing is ever written to upstream.
 
-Not set up, recommended: a ruleset on `main` that requires a pull request (Settings, Rules, Rulesets). Today `main`
-is unprotected, so any token with `contents: write` can push to it; the workflow's write job never does, but a
-ruleset makes that a rule instead of a property of our code.
+### Repository settings for the sync (Matheus's clicks; the tool works with either choice)
+
+| Setting | State (2026-11-26) | Decision |
+| --- | --- | --- |
+| Allow GitHub Actions to create and approve pull requests | off | stays off |
+| Ruleset on `main` requiring a pull request | none | recommended, Matheus clicks it when he likes |
+
+**Allow GitHub Actions to create and approve pull requests.** On, it lets the default token of every workflow in
+the repository open pull requests and approve them; the sync job would then open its pull request with no click.
+Kept off (coordinator, 2026-11-26) because the same switch allows approvals by workflows. Where it lives: Settings,
+Actions, General, section "Workflow permissions", checkbox "Allow GitHub Actions to create and approve pull
+requests", Save. With an optional `FORK_SYNC_TOKEN` the setting does not matter: that token acts as Matheus.
+
+**Ruleset on `main`.** Today `main` is unprotected: any token with `contents: write` can push to it or force-push
+it. The sync's write job never does, but a ruleset makes it a rule instead of a property of our code, so even a
+compromised release that reached a write token could not change `main`. Clicks:
+
+1. Settings, Rules, Rulesets, New ruleset, New branch ruleset.
+2. Ruleset name `main`; Enforcement status Active; Bypass list empty.
+3. Target branches: Add target, Include default branch.
+4. Branch rules: keep "Restrict deletions" and "Block force pushes" ticked; tick "Require a pull request before
+   merging" with Required approvals 0 (Matheus is the only maintainer and cannot approve his own pull request).
+5. Create.
+
+With the ruleset, `main` changes only by merging a pull request: the Merge button or `gh pr merge <n> --merge -R
+delarosa1312/securo-custom` (merge commit, as in `PROCESS.md` step 9); a direct `git push` to `main` is refused.
+`upstream-main` and `sync/<tag>` are not covered, so the sync works the same.
 
 ## Migrations
 
