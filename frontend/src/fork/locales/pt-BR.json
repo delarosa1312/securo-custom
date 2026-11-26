@@ -17,7 +17,8 @@
     "total": "Total",
     "spread": "Distribuído igualmente por dia de {{from}} a {{to}}",
     "noDaysLeft": "Sem dias restantes no mês: não projetado",
-    "empty": "Nenhum orçamento no período. Defina orçamentos na página Orçamentos para incluí-los aqui."
+    "empty": "Nenhum orçamento no período. Defina orçamentos na página Orçamentos para incluí-los aqui.",
+    "slice": "{{name}} · orçamento"
   },
   "reports": {
     "budgetExpenses": "Gastos Orçados",

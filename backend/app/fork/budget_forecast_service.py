@@ -29,7 +29,7 @@ from app.fork.budget_forecast_schemas import (
     Placement,
 )
 from app.models.category import Category
-from app.schemas.report import ReportBreakdown, ReportResponse
+from app.schemas.report import ReportBreakdown, ReportCompositionItem, ReportResponse
 from app.services import budget_service
 
 BUDGET_OUTFLOW_KEY = "budget_outflow"
@@ -38,6 +38,8 @@ _BREAKDOWN = {
     "unallocated": ("unallocatedBudget", "Unallocated Budget"),
 }
 _BREAKDOWN_COLOR = "#F59E0B"
+# Amber shades, largest category first, so the donut's budget slices read as one family yet stay apart (Q8).
+_SLICE_COLORS = ("#F59E0B", "#FBBF24", "#D97706", "#FCD34D", "#B45309", "#FDE68A", "#92400E", "#FEF3C7")
 
 
 async def _never_spending_category_ids(session: AsyncSession, workspace_id: uuid.UUID) -> set[str]:
@@ -154,8 +156,31 @@ def attach_budget_forecast(
     summary = response.summary.model_copy(update={"breakdowns": breakdowns})
 
     return CashFlowBudgetResponse(
-        **response.model_dump(exclude={"trend", "summary"}),
+        **response.model_dump(exclude={"trend", "summary", "composition"}),
         trend=trend,
         summary=summary,
+        composition=list(response.composition) + _budget_composition(plan, key),
         budget_forecast=explanation(plan, placement),
     )
+
+
+def _budget_composition(plan: BudgetForecastPlan, group: str) -> list[ReportCompositionItem]:
+    """One item per budgeted category over the horizon, under the summary figure's key, so the
+    Composition donut's outer ring splits that figure by category as it does Projected Expenses."""
+    totals: dict[str, tuple[str, Decimal]] = {}
+    for month in plan.months:
+        for category in month.categories:
+            key = category.source.category_id
+            name, amount = totals.get(key, (category.source.name, ZERO))
+            totals[key] = (name, amount + category.forecast)
+    ranked = sorted(
+        ((key, name, amount) for key, (name, amount) in totals.items() if amount > ZERO),
+        key=lambda item: (-item[2], item[1], item[0]),
+    )
+    return [
+        ReportCompositionItem(
+            key=f"budget:{key}", label=name, value=round(float(amount), 2),
+            color=_SLICE_COLORS[rank % len(_SLICE_COLORS)], group=group,
+        )
+        for rank, (key, name, amount) in enumerate(ranked)
+    ]

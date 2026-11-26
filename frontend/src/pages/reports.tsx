@@ -45,7 +45,7 @@ import { useCollectionFilter } from '@/contexts/collection-filter-context'
 import type { ReportResponse, CategoryTrendItem } from '@/types'
 import { formatCompactCurrency, formatCurrency, ltrAmount } from '@/lib/format'
 import { cashFlowBar, cashFlowTopSeries } from '@/lib/cash-flow-bars'
-import { BUDGET_COLOR, BUDGET_RANGE_KEY, BUDGET_RANGE_OPTION, BudgetForecastPanel, BudgetForecastToggle, budgetCashFlowBar, cashFlowTooltip, cashFlowWithBudgets, type CashFlowBudgetResponse } from '@/fork/cash-flow-budget'
+import { BUDGET_COLOR, BUDGET_RANGE_KEY, BUDGET_RANGE_OPTION, BudgetForecastPanel, BudgetForecastToggle, budgetCashFlowBar, cashFlowTooltip, cashFlowWithBudgets, isBudgetCompositionGroup, type CashFlowBudgetResponse } from '@/fork/cash-flow-budget'
 import { localDateString, todayInTimezone } from '@/lib/date-utils'
 import { monthLabel } from '@/lib/month-utils'
 import { clampPeriodWindow, explicitWindow, periodWindow, windowMonths, type PeriodPreset } from '@/lib/report-period'
@@ -697,6 +697,7 @@ export default function ReportsPage() {
         return g ? `${t('reports.uncategorized')} · ${g}` : t('reports.uncategorized')
       }
       if (c.key === 'baseline') return t('reports.baseline')
+      if (isBudgetCompositionGroup(c.group)) return t('fork.budgetForecast.slice', { name: c.label })
       return c.label
     }
 

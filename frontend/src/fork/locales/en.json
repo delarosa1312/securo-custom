@@ -17,7 +17,8 @@
     "total": "Total",
     "spread": "Spread evenly per day from {{from}} to {{to}}",
     "noDaysLeft": "No days left this month: not projected",
-    "empty": "No budgets in this period. Set budgets on the Budgets page to include them here."
+    "empty": "No budgets in this period. Set budgets on the Budgets page to include them here.",
+    "slice": "{{name}} · budget"
   },
   "reports": {
     "budgetExpenses": "Budgeted Spending",

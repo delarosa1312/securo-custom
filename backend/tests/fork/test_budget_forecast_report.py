@@ -417,3 +417,22 @@ async def test_future_dated_posted_installment_counts_once(session, test_user, t
     assert _category(on, "2026-11", "Restaurants").remaining == Decimal("110.00")
     # The walk applies the 50 once (it is in both reports) and the budget adds only the rest.
     assert round(_breakdown(off, "endingBalance") - _breakdown(on, "endingBalance"), 2) == 910.0
+
+
+@pytest.mark.asyncio
+async def test_composition_splits_the_budget_figure_by_category(session, test_user, test_workspace, today):
+    acct, *_ = await _worked_example(session, test_user, test_workspace)
+    off = await _report(session, test_workspace, test_user)
+    on = await _report(session, test_workspace, test_user, budget_forecast=True)
+
+    budget_items = [c for c in on.composition if c.group == "budgetExpenses"]
+    # Groceries: 0 left in November, 600 in December; Restaurants 110 + 250; Streaming is fully scheduled.
+    assert [(c.label, c.value, c.color) for c in budget_items] == [
+        ("Groceries", 600.0, "#F59E0B"), ("Restaurants", 360.0, "#FBBF24"),
+    ]
+    assert round(sum(c.value for c in budget_items), 2) == _breakdown(on, "budgetExpenses")
+    # Upstream's items are untouched and come first.
+    assert on.composition[: len(off.composition)] == off.composition
+
+    filtered = await _report(session, test_workspace, test_user, account_ids=[acct.id], budget_forecast=True)
+    assert {c.group for c in filtered.composition if c.key.startswith("budget:")} == {"unallocatedBudget"}

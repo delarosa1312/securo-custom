@@ -40,3 +40,6 @@ export type CashFlowBudgetResponse = ReportResponse & { budget_forecast?: Budget
 export const BUDGET_OUTFLOW_KEY = 'budget_outflow'
 export const BUDGET_RANGE_KEY = '24m'
 export const BUDGET_RANGE_OPTION: { key: string; months: number } = { key: BUDGET_RANGE_KEY, months: 24 }
+
+/** Composition items the budget mode adds, grouped under its summary figure's key (budgetExpenses or unallocatedBudget). */
+export const isBudgetCompositionGroup = (group: string) => group === 'budgetExpenses' || group === 'unallocatedBudget'

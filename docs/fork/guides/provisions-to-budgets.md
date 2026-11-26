@@ -92,5 +92,6 @@ they are, since the budget is not part of those accounts' flows. Over MCP, `get_
 - A scheduled refund (a pending or recurring credit) in a budgeted category does not free budget until it posts:
   budgets count scheduled debits only. While it is pending the forecast counts the refund as income and the
   budget as still to be spent, so the projected end balance drops by the refund's amount on the day it posts.
+  Issue #8 will count scheduled credits as negative scheduled spending, on the Budgets page too.
 - Spending you share with someone in a group counts at your share, as on the Budgets page, while the account
   still moves by the full amount you paid.

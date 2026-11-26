@@ -59,6 +59,7 @@ function budgetReport(): CashFlowBudgetResponse {
       ],
     },
     trend: [{ date: '2026-09-20', value: 4820, breakdowns: { inflow: 0, outflow: 40, budget_outflow: 11 }, change: null }],
+    composition: [{ key: 'budget:c1', label: 'Restaurants', value: 110, color: '#F59E0B', group: 'budgetExpenses' }],
     budget_forecast: {
       placement: 'subtracted', rule: 'even_daily', total: '110.00',
       months: [{
@@ -117,6 +118,8 @@ describe('Cash Flow: Include budgets (F-002)', () => {
     await waitFor(() => expect(fork.cashFlowWithBudgets).toHaveBeenCalledWith(6, 'monthly', undefined))
     expect(await screen.findByTestId('cash-flow-budget-panel')).toHaveTextContent('Restaurants')
     expect(screen.getAllByText(t('reports.budgetExpenses')).length).toBeGreaterThan(0)
+    // The donut's outer ring names each budget slice apart from the same category's scheduled expenses.
+    expect(screen.getByText(t('fork.budgetForecast.slice', { name: 'Restaurants' }))).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: t('reports.range24m') }))
     await waitFor(() => expect(fork.cashFlowWithBudgets).toHaveBeenLastCalledWith(24, 'monthly', undefined))
   })
