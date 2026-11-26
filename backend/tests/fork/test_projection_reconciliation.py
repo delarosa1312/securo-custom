@@ -31,6 +31,9 @@ MOVES: dict[str, list[tuple[date, str, str]]] = {
     "future_posted_installment": [(D(2026, 12, 5), "-80", "checking")],
     "recurring": [(D(2026, 11, 28), "-30", "checking"), (D(2026, 12, 28), "-30", "checking")],
     "recurring_materialized": [(D(2026, 11, 28), "-30", "checking"), (D(2026, 12, 28), "-30", "checking")],
+    # Q12: an occurrence dated today or earlier counts only once it is a row; the next one counts on its date.
+    "recurring_overdue": [(D(2026, 12, 15), "-30", "checking")],
+    "recurring_due_today": [(D(2026, 12, 20), "-30", "checking")],
     "transfer_future": [(D(2026, 12, 3), "-200", "checking"), (D(2026, 12, 3), "200", "savings")],
     "transfer_past": [(D(2026, 11, 5), "-300", "checking"), (D(2026, 11, 5), "300", "savings")],
     "recurring_transfer_like": [(D(2026, 11, 25), "-500", "checking"), (D(2026, 12, 25), "-500", "checking")],

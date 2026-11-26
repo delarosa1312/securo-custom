@@ -484,3 +484,29 @@ async def test_a_refund_larger_than_posted_spending_moves_nothing_when_it_posts(
     after = await read()
     assert before == after
     assert before[0] == Decimal("30")
+
+
+@pytest.mark.asyncio
+async def test_an_occurrence_dated_today_or_earlier_counts_only_once_it_is_a_row(
+    session, test_user, test_workspace, today,
+):
+    """Q12: rules due 11-15 and today, never generated, project nothing this month; generated, they count once."""
+    checking = await data.account(session, test_user, test_workspace)
+    cat = await data.category(session, test_user, test_workspace, "Utilities")
+    await data.budget(session, test_user, test_workspace, cat, "250")
+    overdue = await data.recurring(session, test_user, test_workspace, checking, "40", date(2026, 11, 15), cat=cat)
+    due_today = await data.recurring(session, test_user, test_workspace, checking, "25", today, cat=cat)
+    await data.recurring(session, test_user, test_workspace, checking, "10", date(2026, 11, 28), cat=cat)
+
+    async def read():
+        rows = await budget_service.get_budget_vs_actual(session, test_workspace.id, test_user.id, date(2026, 11, 1))
+        row = next(r for r in rows if r.category_id == cat.id)
+        return row.actual_amount, row.projected_amount
+
+    assert await read() == (Decimal("0"), Decimal("10"))
+    for rule, when in ((overdue, date(2026, 11, 15)), (due_today, today)):
+        row = await data.txn(session, test_user, test_workspace, checking, str(rule.amount), when, cat=cat,
+                             source="recurring")
+        row.recurring_transaction_id = rule.id
+    await session.commit()
+    assert await read() == (Decimal("65"), Decimal("75"))
