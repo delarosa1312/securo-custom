@@ -51,6 +51,19 @@ ids `f001`, `f002`, ...), each depending only on the upstream revision it needs.
 - Each has a tested `downgrade()`, so the previous custom image can run after a rollback (see `DEPLOY.md`).
 - When upstream ships the same column or table, the retiring migration moves the data and drops ours.
 
+## GitHub workflows in the fork (checked 2026-11-26)
+
+| Workflow | State | Why |
+| --- | --- | --- |
+| `ci.yml` (CI) | active | backend shards, frontend, checks on pull requests to `main` and pushes to `main` |
+| `approve-fork-runs`, `fast-lane`, `label-guard`, `pr-labels`, `stale-queue`, `downloads-badge` | disabled in the Actions settings (`gh workflow disable`) | upstream maintainer automation; files stay identical to upstream |
+| `prepare-release`, `release` (Build and Push Docker Images) | disabled | upstream release and image publishing; ours come with the release issue |
+
+Repository variables `APPROVE_FORK_RUNS`, `FAST_LANE`, `STALE_QUEUE` are `off`. The repository is a GitHub fork, and
+GitHub does not run any workflow in a fork until the owner enables them once: Actions tab, button "I understand my
+workflows, go ahead and enable them". Before that click the fork had zero workflow runs (not even for the push that
+merged pull request #11 into `main`).
+
 ## Contributing back
 
 Generic fixes and features are prepared as upstream-shaped branches (no fork paths, numbered migration, all 20
@@ -83,5 +96,12 @@ One row per downstream change. Add the row in the pull request that adds the cha
 | Patch | Issue / PR | Upstream files touched (hook) | Depends on | Why we carry it | Remove when |
 | --- | --- | --- | --- | --- | --- |
 | Fork knowledge base and tools | #1 | none (`CLAUDE.md`, `docs/fork/`, `fork/` are new) | none | project process | never (fork-only) |
+| Fork migration line (D-003) | #1 | `backend/alembic.ini` (one `version_locations` line); `docker-compose.yml`, `docker-compose.prod.yml` (`migrate`: `upgrade heads`); `backend/tests/test_schema_matches_migrations_postgres.py`, `backend/tests/test_agent_tool_name_lengths_postgres.py` (`upgrade heads`) | none | our migrations never collide with upstream's numbered line | we carry no fork migration, or upstream supports a second line |
+| Fork locale bundles (D-004) | #1 | `frontend/src/lib/i18n.ts` (two imports, the `fork` key in the `en` and `pt-BR` resources) | none | fork strings outside upstream's 20 locale files | we carry no fork strings |
+| Backend, test and frontend skeleton, local stack, E2E | #1 | none (`backend/app/fork/`, `backend/tests/fork/`, `backend/alembic/fork_versions/`, `frontend/src/fork/`, `fork/stack/`, `fork/e2e/` are new) | none | where features land, how they are exercised | never (fork-only) |
 | F-001 available balance setting (backend) | #4 | `models/account.py` (column line), `schemas/account.py` (field on `AccountRead`, `AccountUpdate`), `services/account_service.py` (key in `serialize_account`, connected-account allow-list, `check_available_setting` call in `update_account`), `services/cashflow_forecast_service.py` (switched-off accounts left out of the starting balance, manual rules and burn, and passed to the detector), `services/recurring_detector_service.py` (optional `exclude_account_ids` argument and one skip in the clustering loop), `app/main.py` (router include before `accounts_router`), `mcp_server/tools/accounts.py` (field in `list_accounts`), `mcp_server/tools/__init__.py` (import), `tests/api_contract/baseline.json` (one route); migration `f001` | `f000` | upstream has no way to keep reserved money out of "available" (upstream issue #871 item 3) | upstream ships an equivalent account flag: migrate `include_in_available` into it, drop `f001`'s column, remove the hooks |
 | F-001 available balance setting (frontend) | #4 | `pages/dashboard.tsx` (cash accounts memo split so the predicate filters only the available list; the net-worth cash fallback sums the unfiltered list), `components/dashboard-widgets.tsx` (predicate in the existing type filter), `pages/accounts.tsx` (switch in `AccountDialog`, marker in the two row subtitles), `components/agents/proposal-card.tsx` and `lib/agent-proposals.ts` (one kind), `types/index.ts` (optional field) | backend row | same | same |
+
+Not patched on purpose: the Helm chart (`charts/securo`) still runs `alembic upgrade head`, which fails from the
+first sync that brings an upstream migration (two heads). We deploy with Compose; a Helm deploy of the fork needs
+the same change in `charts/securo/templates/backend/job-migration.yaml`.

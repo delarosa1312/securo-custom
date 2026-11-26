@@ -2,7 +2,6 @@ import { fireEvent, screen } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { renderWithProviders, t } from '@/test/utils'
 import type { Account } from '@/types'
-import './test-i18n'
 
 vi.mock('@/hooks/use-timezone', () => ({ useEffectiveTimezone: () => 'UTC' }))
 vi.mock('@/contexts/auth-context', () => ({ useAuth: () => ({ user: null }) }))

@@ -3,7 +3,6 @@ import { screen, waitFor } from '@testing-library/react'
 import { describe, expect, it, vi } from 'vitest'
 import { renderWithProviders, t } from '@/test/utils'
 import { isProposalData } from '@/lib/agent-proposals'
-import './test-i18n'
 
 const { updateAccount } = vi.hoisted(() => ({ updateAccount: vi.fn() }))
 vi.mock('@/lib/api', () => ({

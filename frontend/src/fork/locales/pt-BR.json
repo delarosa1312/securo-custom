@@ -1,4 +1,7 @@
 {
+  "app": {
+    "name": "Securo Custom"
+  },
   "availableBalance": {
     "setting": "Incluir no saldo disponível",
     "settingHint": "Desative para dinheiro guardado à parte, como uma reserva de emergência. A conta continua no saldo total, no patrimônio líquido e nos relatórios.",
