@@ -379,16 +379,35 @@ async def test_closing_an_account_does_not_change_the_budget_layer(session, test
 
 
 @pytest.mark.asyncio
-async def test_scheduled_refund_does_not_free_budget_until_posted(session, test_user, test_workspace, today):
-    """Known limit (guide): budgets count scheduled debits only, so a pending refund frees budget
-    when it posts, and the end balance drops by that amount at that moment."""
+async def test_scheduled_refund_frees_budget_before_it_posts(session, test_user, test_workspace, today):
+    """Q9 (issue #8): a scheduled credit in a budgeted category is negative scheduled spending, so the
+    projected end balance does not move when the refund posts."""
     acct, restaurants, *_ = await _worked_example(session, test_user, test_workspace)
-    await data.txn(session, test_user, test_workspace, acct, "20", date(2026, 11, 25), "credit", cat=restaurants,
-                   status="pending")
+    refund = await data.txn(session, test_user, test_workspace, acct, "20", date(2026, 11, 25), "credit",
+                            cat=restaurants, status="pending")
+    pending = await _report(session, test_workspace, test_user, budget_forecast=True)
+
+    nov = _category(pending, "2026-11", "Restaurants")
+    assert (nov.posted, nov.scheduled, nov.remaining) == (Decimal("100.00"), Decimal("20.00"), Decimal("130.00"))
+
+    refund.status, refund.date, refund.effective_date = "posted", today, today
+    await session.commit()
+    posted = await _report(session, test_workspace, test_user, budget_forecast=True)
+    nov = _category(posted, "2026-11", "Restaurants")
+    assert (nov.posted, nov.scheduled, nov.remaining) == (Decimal("80.00"), Decimal("40.00"), Decimal("130.00"))
+    assert _breakdown(posted, "endingBalance") == _breakdown(pending, "endingBalance")
+
+
+@pytest.mark.asyncio
+async def test_recurring_refund_frees_budget_in_each_month(session, test_user, test_workspace, today):
+    acct, restaurants, *_ = await _worked_example(session, test_user, test_workspace)
+    await data.recurring(session, test_user, test_workspace, acct, "15", date(2026, 11, 27), cat=restaurants,
+                         txn_type="credit")
     report = await _report(session, test_workspace, test_user, budget_forecast=True)
 
-    nov = _category(report, "2026-11", "Restaurants")
-    assert (nov.posted, nov.scheduled, nov.remaining) == (Decimal("100.00"), Decimal("40.00"), Decimal("110.00"))
+    assert _category(report, "2026-11", "Restaurants").remaining == Decimal("125.00")
+    # December has no spending: net spending never goes below zero, as with a posted refund.
+    assert _category(report, "2026-12", "Restaurants").remaining == Decimal("250.00")
 
 
 @pytest.mark.asyncio
