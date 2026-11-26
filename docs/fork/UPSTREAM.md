@@ -51,6 +51,19 @@ ids `f001`, `f002`, ...), each depending only on the upstream revision it needs.
 - Each has a tested `downgrade()`, so the previous custom image can run after a rollback (see `DEPLOY.md`).
 - When upstream ships the same column or table, the retiring migration moves the data and drops ours.
 
+## GitHub workflows in the fork (checked 2026-11-26)
+
+| Workflow | State | Why |
+| --- | --- | --- |
+| `ci.yml` (CI) | active | backend shards, frontend, checks on pull requests to `main` and pushes to `main` |
+| `approve-fork-runs`, `fast-lane`, `label-guard`, `pr-labels`, `stale-queue`, `downloads-badge` | disabled in the Actions settings (`gh workflow disable`) | upstream maintainer automation; files stay identical to upstream |
+| `prepare-release`, `release` (Build and Push Docker Images) | disabled | upstream release and image publishing; ours come with the release issue |
+
+Repository variables `APPROVE_FORK_RUNS`, `FAST_LANE`, `STALE_QUEUE` are `off`. The repository is a GitHub fork, and
+GitHub does not run any workflow in a fork until the owner enables them once: Actions tab, button "I understand my
+workflows, go ahead and enable them". Before that click the fork had zero workflow runs (not even for the push that
+merged pull request #11 into `main`).
+
 ## Contributing back
 
 Generic fixes and features are prepared as upstream-shaped branches (no fork paths, numbered migration, all 20
@@ -83,4 +96,11 @@ One row per downstream change. Add the row in the pull request that adds the cha
 | Patch | Issue / PR | Upstream files touched (hook) | Depends on | Why we carry it | Remove when |
 | --- | --- | --- | --- | --- | --- |
 | Fork knowledge base and tools | #1 | none (`CLAUDE.md`, `docs/fork/`, `fork/` are new) | none | project process | never (fork-only) |
+| Fork migration line (D-003) | #1 | `backend/alembic.ini` (one `version_locations` line); `docker-compose.yml`, `docker-compose.prod.yml` (`migrate`: `upgrade heads`); `backend/tests/test_schema_matches_migrations_postgres.py`, `backend/tests/test_agent_tool_name_lengths_postgres.py` (`upgrade heads`) | none | our migrations never collide with upstream's numbered line | we carry no fork migration, or upstream supports a second line |
+| Fork locale bundles (D-004) | #1 | `frontend/src/lib/i18n.ts` (two imports, the `fork` key in the `en` and `pt-BR` resources) | none | fork strings outside upstream's 20 locale files | we carry no fork strings |
+| Backend, test and frontend skeleton, local stack, E2E | #1 | none (`backend/app/fork/`, `backend/tests/fork/`, `backend/alembic/fork_versions/`, `frontend/src/fork/`, `fork/stack/`, `fork/e2e/` are new) | none | where features land, how they are exercised | never (fork-only) |
 | Budget-aware Cash Flow mode | #5 | `backend/app/services/report_service.py` (`get_cash_flow_report`: `budget_forecast` argument, one block before the day walk, one at the return); `backend/app/api/reports.py` (`/cash-flow`: `budget_forecast` query, `months` up to 24 only with it, response model `CashFlowBudgetResponse | ReportResponse`, `guard_cash_flow_request`); `backend/mcp_server/tools/reports.py` (`get_cash_flow`: one parameter); `frontend/src/pages/reports.tsx` (toggle, 24M range, query, bar series, tooltip, panel) | `budget_service.get_budget_vs_actual` semantics | upstream projections have no budget layer (upstream issue #1103) | upstream counts remaining budgets in the cash-flow projection |
+
+Not patched on purpose: the Helm chart (`charts/securo`) still runs `alembic upgrade head`, which fails from the
+first sync that brings an upstream migration (two heads). We deploy with Compose; a Helm deploy of the fork needs
+the same change in `charts/securo/templates/backend/job-migration.yaml`.

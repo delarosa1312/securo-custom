@@ -15,14 +15,29 @@ Upstream releases every few days. Each line we change in an upstream file is a p
 Logic goes in `backend/app/fork/`, `backend/mcp_server/tools/fork_*.py`, `frontend/src/fork/`, `fork/`; upstream
 files get a call, an import or a column. Every hook is a row in the patch inventory (`UPSTREAM.md`).
 
-## D-003 Fork migrations are a second Alembic branch (2026-11-26, to be verified on PostgreSQL in #1)
+## D-003 Fork migrations are a second Alembic branch (2026-11-26, verified on PostgreSQL in #1)
 
 Upstream ADR 0010 keeps one numbered line and renumbers on collision. A numbered migration of ours would collide
 with every upstream release and force edits to applied migrations. Ours live in
 `backend/alembic/fork_versions/` with branch label `fork` and ids `f001...`; deploy runs `alembic upgrade heads`.
 Cost: `alembic.ini` gains `version_locations`, the migrate command and the schema test use `heads`, and we keep a
-check of our own line. Open point for #1: confirm `alembic current --check-heads` passes with two heads and that
-upstream's chain check stays green.
+check of our own line.
+
+Outcome (#1, scratch `pgvector/pgvector:pg16`, upstream `132` and `133` brought in on a throwaway branch):
+- Root `f000` is empty, `down_revision = "131"`, `branch_labels = ("fork",)`. Until upstream adds a migration
+  after `131` there is one head (`f000`); from the first sync on there are exactly two (`133` and `f000`).
+- With two heads, `alembic upgrade head` fails ("Multiple head revisions"); `upgrade heads` works on a fresh
+  database, on one at `131`, on one at upstream `133` and on one built before the sync. So the migrate command and
+  the two PostgreSQL tests that migrate (`test_schema_matches_migrations_postgres.py`,
+  `test_agent_tool_name_lengths_postgres.py`) use `heads` now, not at the first sync.
+- `alembic current --check-heads` passes with both rows in `alembic_version` and fails while either line is
+  behind, so upstream's startup gate keeps working unchanged.
+- Upstream's `check_migration_chain.py` reads only `versions/` and stays green; `fork/tools/check_fork_migrations.py`
+  checks our line (in `check.sh`).
+- Downgrade our line only: `alembic downgrade fork@<target>` (for example `fork@f000` removes every fork migration).
+  Never `fork@base`: the branch's base is upstream's first migration, and it starts downgrading upstream's line.
+- Not changed: the Helm chart (`charts/securo`) still runs `upgrade head`; we deploy with Compose. A Helm deploy of
+  the fork would need the same one-word change.
 
 ## D-004 Fork strings in fork locale bundles (2026-11-26)
 
@@ -47,7 +62,20 @@ Dashing's coordinator and quality tools carry Dashing assumptions. This reposito
 `fork/tools/` and a written process (`PROCESS.md`); state lives in GitHub issues and the memory folder. No
 registry or orchestration framework until a concrete need shows up twice.
 
-## D-008 Fork fields on an upstream response only when a fork option is on (2026-11-26, #5)
+## D-008 E2E runs on a local Compose stack with a REST seed and a Playwright package of our own (2026-11-26)
+
+Upstream has no end-to-end suite. `fork/tools/stack.sh` runs upstream's `docker-compose.yml` plus
+`fork/stack/compose.yml` (own project name, loopback ports, project volumes, no host secrets or backup folder,
+agents profile on for MCP, a scrubbed environment) built from the worktree. The backend runs from its image, not
+upstream's `./backend:/app` bind mount: with the mount, root-owned folders and caches landed in the worktree and
+35 host backend tests then failed on permissions. `fork/stack/seed.py` loads a synthetic data set through the
+public REST API (stdlib only), so the seed follows upstream's validation instead of writing rows directly;
+`backend/scripts/seed_perf.py` was not enough (no budgets, pending rows, installments or transfers). Scenarios
+live in `fork/e2e/` with their own `package.json` (Playwright, the machine's Chromium), so `frontend/package.json`
+stays upstream's. A scenario drives the screen, calls REST and calls MCP as an external client, and saves
+screenshots and JSON responses as evidence.
+
+## D-009 Fork fields on an upstream response only when a fork option is on (2026-11-26, #5)
 
 The budget-aware Cash Flow mode adds a trend figure, a summary figure and an explanation block to
 `GET /api/reports/cash-flow`. Adding optional fields to upstream's `ReportResponse` would put `null` keys in every

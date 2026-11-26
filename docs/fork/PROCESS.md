@@ -19,6 +19,8 @@ A brief's "done" never drops a step unless Matheus said so.
 
 1. **Branch**: `fork/tools/new-branch.sh <issue> <slug>` in the session's worktree. Never `git checkout -b`: a
    branch is linked to its issue only when GitHub creates it.
+   The worktree lives at `.worktrees/<issue>-<slug>` inside the main checkout (ignored by upstream's
+   `.gitignore`); the main checkout itself stays on `main`.
 2. **Investigate, then plan before coding**, posted as one comment on the issue:
    - what upstream already does (reproduce the limitation at `v0.22.0`, cite code) and what is missing;
    - the approach by the preference order in `CLAUDE.md`, with each hook into an upstream file named;
@@ -110,9 +112,50 @@ Tool-enforced approvals and permission prompts stay as they are: a refusal is re
 - One Docker build or stack per machine at a time: `fork/tools/stack.sh` takes the same lock for builds.
 - Long output goes to `~/scratch/securo-custom/<issue>/`, never `/tmp` (it is RAM) and never the repository.
 
+## Tools
+
+| Command | What it does |
+| --- | --- |
+| `fork/tools/new-branch.sh <issue> <slug>` | creates the issue-linked branch on GitHub (only GitHub can link it) and switches this worktree to it; `FORK_BRANCH_TYPE` sets the prefix (default `feat`) |
+| `fork/tools/check.sh [backend\|frontend]` | ruff, ty, upstream migration chain, fork migration chain, eslint, tsc; prints only failures |
+| `fork/tools/test.sh backend\|frontend [args]` | pytest or vitest with 4 workers, one heavy run per machine (a lock) |
+| `fork/tools/stack.sh up\|seed\|status\|logs\|down` | the local synthetic stack for E2E (below) |
+
+PostgreSQL-only tests (`backend/tests/*_postgres.py`) need a pgvector database: start a throwaway
+`pgvector/pgvector:pg16` container on a free loopback port, run
+`POSTGRES_TEST_URL=postgresql+asyncpg://<user>:<password>@127.0.0.1:<port>/<db> fork/tools/test.sh backend tests -k postgres`,
+then remove the container.
+
 ## E2E
 
 Upstream has no end-to-end suite. Ours is a local Docker Compose stack built from the worktree, with its own
-project name, ports and volumes, seeded with synthetic data. It never uses production volumes, secrets or data.
-`fork/tools/stack.sh` and the scenario format are delivered by the foundation issue; until then an issue session
-states in its plan how it will exercise the real app.
+project name, ports and volumes, seeded with synthetic data. It never uses production volumes, secrets or data
+(D-008).
+
+```bash
+fork/tools/stack.sh up        # build (under the heavy lock) and start: http://127.0.0.1:13000, API :18000, MCP :18765
+fork/tools/stack.sh seed      # synthetic data through the REST API, into a fresh stack only
+cd fork/e2e && npm ci         # first time; uses /usr/bin/chromium (FORK_E2E_CHROMIUM to change), no browser download
+FORK_E2E_OUT=~/scratch/securo-custom/<issue>/e2e npx playwright test [scenarios/<file>]
+fork/tools/stack.sh down      # stop and delete the stack and its volumes
+```
+
+- One stack per machine (project `securo-custom-e2e`). `up` and `down` refuse while another worktree owns its
+  containers or volumes, even stopped ones; the owner runs `down` first.
+- The backend services run the image built from the worktree (no bind mount, so nothing root-owned lands in the
+  worktree): after a backend change run `up` again (cached rebuild). The frontend dev server mounts
+  `frontend/` and reloads. A migration change needs `down`, `up` and `seed`.
+- Real configuration never reaches the stack: Compose runs with a scrubbed environment (only the three port
+  variables), and `up` refuses when a `.env*` (other than `.env.example`) or a `secrets/` folder exists in the
+  worktree.
+- Seed (`fork/stack/seed.py`): login `e2e@example.com` / `Synthetic-E2E-2026` (local stack only), three accounts
+  (checking, savings, credit card), three months of posted history, pending rows in the past and the future, an
+  installment series of ten parcels, transfers in the past and the future, four monthly recurring schedules,
+  recurring and month-specific budgets. Dates are relative to today. A feature that needs more adds it there.
+- Scenario format: one Playwright spec per scenario in `fork/e2e/scenarios/`, named after the issue
+  (`f001-available-balance.spec.ts`). Helpers in `fork/e2e/lib/stack.ts`: `loginInBrowser`, `restToken` and
+  `rest` for the API, `mcpClient(...).call(tool, args)` for MCP as an external client (token minted by the app),
+  `screenshot` and `saveEvidence` into `FORK_E2E_OUT`. A scenario checks the screen, REST and MCP against the same
+  expected numbers and, for a switchable feature, that with the switch off the responses equal upstream's.
+- Evidence for the pull request: the screenshots and JSON files from `FORK_E2E_OUT`, never committed.
+- `scenarios/smoke-cash-flow.spec.ts` is the reference: Cash Flow report on screen, over REST and over MCP.

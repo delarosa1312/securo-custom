@@ -1,4 +1,7 @@
 {
+  "app": {
+    "name": "Securo Custom"
+  },
   "budgetForecast": {
     "toggle": "Include budgets",
     "toggleHelp": "Adds what is left of each monthly budget as expected spending, spread evenly per day (this month from tomorrow). Budgets have no account: with an account or collection filter the amount is shown apart and not subtracted. Cannot be combined with Include estimate yet.",

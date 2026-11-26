@@ -49,19 +49,25 @@ that matches your task. GitHub issues on `delarosa1312/securo-custom` are the sp
 ## Commands
 
 ```bash
-fork/tools/check.sh [backend|frontend]      # ruff, ty, migration chain, eslint, tsc; prints only failures
+fork/tools/check.sh [backend|frontend]      # ruff, ty, both migration chains, eslint, tsc; prints only failures
 fork/tools/test.sh backend [pytest args]    # capped workers, one heavy run at a time across sessions
 fork/tools/test.sh frontend [vitest args]
 fork/tools/new-branch.sh <issue> <slug>     # issue-linked branch from origin/main, switched to in this worktree
+fork/tools/stack.sh up|seed|status|logs|down  # local synthetic stack: :13000 app, :18000 API, :18765 MCP
+cd fork/e2e && FORK_E2E_OUT=~/scratch/securo-custom/<issue>/e2e npx playwright test   # E2E (PROCESS.md)
 ```
+
+Migrations: `alembic upgrade heads` (two heads after a sync); undo ours only with `alembic downgrade fork@<rev>`,
+never `fork@base` (it walks into upstream's line).
 
 Never run bare `pytest -n auto`, `npm test` or `docker compose up --build` in parallel with other sessions: the
 machine has 20 cores and 31 GB shared by every session. Use the wrappers; they queue on one lock.
-First time in a checkout: `cd backend && uv sync --all-extras`, `cd frontend && npm ci`.
+First time in a checkout: `cd backend && uv sync --all-extras`, `cd frontend && npm ci`, `cd fork/e2e && npm ci`.
 
 ## Sessions
 
 - One issue, one session, one worktree, one scoped pull request to `main`. The coordinator session integrates.
+  Worktrees: `.worktrees/<issue>-<slug>` in the main checkout, which stays on `main`.
 - Follow the order of work in `docs/fork/PROCESS.md`; a brief's "done" never drops a step.
 - Notes live in the memory folder `~/.claude/projects/-home-Unified-Documents-Projects-Personal-securo-custom/memory/`
   (`MEMORY.md`, `active-work.md`, one `issue-<n>-<slug>.md` per issue). Keep your issue note current at each

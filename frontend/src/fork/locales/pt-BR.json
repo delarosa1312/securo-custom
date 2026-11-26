@@ -1,4 +1,7 @@
 {
+  "app": {
+    "name": "Securo Custom"
+  },
   "budgetForecast": {
     "toggle": "Incluir orçamentos",
     "toggleHelp": "Soma o que resta de cada orçamento mensal como gasto previsto, distribuído igualmente por dia (no mês atual, a partir de amanhã). Orçamentos não têm conta: com filtro de conta ou coleção, o valor aparece à parte e não é descontado do saldo. Ainda não pode ser combinado com Incluir estimativa.",

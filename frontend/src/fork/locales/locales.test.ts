@@ -1,35 +1,47 @@
 import { describe, expect, it } from 'vitest'
 
+import i18n from '@/lib/i18n'
 import en from './en.json'
 import ptBR from './pt-BR.json'
 
-function leaves(value: unknown, prefix = ''): Record<string, string> {
-  if (typeof value === 'string') return { [prefix]: value }
-  return Object.entries(value as Record<string, unknown>).reduce(
-    (acc, [key, child]) => ({ ...acc, ...leaves(child, prefix ? `${prefix}.${key}` : key) }),
-    {} as Record<string, string>,
-  )
+function flatten(obj: Record<string, unknown>, prefix = ''): Map<string, string> {
+  const out = new Map<string, string>()
+  for (const [k, v] of Object.entries(obj)) {
+    const key = prefix ? `${prefix}.${k}` : k
+    if (typeof v === 'string') out.set(key, v)
+    else if (v !== null && typeof v === 'object' && !Array.isArray(v))
+      for (const [inner, value] of flatten(v as Record<string, unknown>, key)) out.set(inner, value)
+  }
+  return out
 }
 
-const placeholders = (text: string) => [...text.matchAll(/{{\s*(\w+)\s*}}/g)].map((m) => m[1]).sort()
+const placeholders = (value: string) => [...(value.match(/\{\{(\w+)\}\}/g) ?? [])].sort()
 
-describe('fork locale bundles', () => {
-  const english = leaves(en)
-  const portuguese = leaves(ptBR)
+describe('fork locale bundles (D-004)', () => {
+  const enKeys = flatten(en)
+  const ptKeys = flatten(ptBR)
 
-  it('have the same keys in English and pt-BR', () => {
-    expect(Object.keys(portuguese).sort()).toEqual(Object.keys(english).sort())
+  it('have identical keys in en and pt-BR', () => {
+    expect([...ptKeys.keys()].sort()).toEqual([...enKeys.keys()].sort())
   })
 
-  it('keep the same placeholders', () => {
-    for (const key of Object.keys(english)) {
-      expect(placeholders(portuguese[key]), key).toEqual(placeholders(english[key]))
+  it('have the same placeholders and no empty strings', () => {
+    for (const [key, value] of enKeys) {
+      expect(value.trim(), key).not.toBe('')
+      expect(ptKeys.get(key)?.trim(), key).not.toBe('')
+      expect(placeholders(ptKeys.get(key) ?? ''), key).toEqual(placeholders(value))
     }
+  })
+
+  it('are merged into the translation namespace under fork', () => {
+    const [firstKey, firstValue] = [...enKeys][0]
+    expect(i18n.getResource('en', 'translation', `fork.${firstKey}`)).toBe(firstValue)
+    expect(i18n.getResource('pt-BR', 'translation', `fork.${firstKey}`)).toBe(ptKeys.get(firstKey))
+    // Upstream keys are still there next to ours.
+    expect(Object.keys(i18n.getResourceBundle('en', 'translation')).length).toBeGreaterThan(1)
   })
 
   it('never use an em dash or en dash', () => {
-    for (const text of [...Object.values(english), ...Object.values(portuguese)]) {
-      expect(text).not.toMatch(/[–—]/)
-    }
+    for (const value of [...enKeys.values(), ...ptKeys.values()]) expect(value).not.toMatch(/[\u2013\u2014]/)
   })
 })
