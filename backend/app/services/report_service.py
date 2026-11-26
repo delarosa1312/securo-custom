@@ -128,7 +128,7 @@ async def _get_report_assets(
         Asset.workspace_id == workspace_id,
         Asset.is_archived == False,
         held_on(since),
-    )
+    ).order_by(Asset.position, Asset.name, Asset.id)  # fork F-006: a stable order
     if account_ids is not None:
         stmt = stmt.where(Asset.group_id.in_(asset_group_ids or []))
     assets = list((await session.execute(stmt)).scalars().all())
@@ -161,7 +161,8 @@ async def _net_worth_at(
     if accounts is None:
         accounts = await _get_open_accounts(session, workspace_id, account_ids, closed_after=cutoff)
     # Same set the dashboard summary counts for this date (_open_on).
-    accounts = [a for a in accounts if _open_on(a, cutoff)]
+    # Fork F-006: the Accounts page order, so the lists keep their places after an edit.
+    accounts = sorted((a for a in accounts if _open_on(a, cutoff)), key=lambda a: (a.name.casefold(), str(a.id)))
 
     accounts_total = 0.0
     liabilities_total = 0.0
