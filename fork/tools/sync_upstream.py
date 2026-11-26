@@ -56,6 +56,8 @@ INVENTORY_DOC = "docs/fork/UPSTREAM.md"
 BEFORE_UPDATE_LIMIT = 1500
 # Tokens never reach a command that runs upstream's code (chain checks, uv, alembic).
 TOKEN_VARS = ("GH_TOKEN", "GITHUB_TOKEN", "GH_ENTERPRISE_TOKEN", "FORK_SYNC_TOKEN")
+# Logins gh reports for the Actions bot (proposals made with the default token); the owner is added per repository.
+TRUSTED_BOTS = ("app/github-actions", "github-actions[bot]", "github-actions")
 
 
 def version(tag: str) -> tuple[int, int, int] | None:
@@ -138,13 +140,16 @@ def security_hits(
     return hits
 
 
-CODE_SPAN_RE = re.compile(r"(`+)(?:.+?)\1", re.S)
+# A code span: a backtick run, then the same-length run, neither touching another backtick (CommonMark).
+CODE_SPAN_RE = re.compile(r"(?<!`)(`+)(?!`)(?:.+?)(?<!`)\1(?!`)", re.S)
 
 
 def _defang_plain(text: str) -> str:
     def code(m: re.Match) -> str:
         return f"`{m.group(0)}`"
 
+    # A stray backtick would pair with the ones added below and turn the rest back into live text.
+    text = text.replace("`", "\\`")
     # Issue and pull request references would create cross-reference events (upstream's) or link ours.
     text = re.sub(
         r"https?://github\.com/[\w.-]+/[\w.-]+/(?:issues|pull|discussions)/\d+[^\s)\]>]*",
@@ -153,8 +158,8 @@ def _defang_plain(text: str) -> str:
     )
     text = re.sub(r"(?<![\w`/.-])[\w.-]+/[\w.-]+#\d+\b", code, text)
     text = re.sub(r"\bGH-\d+\b", code, text)
-    text = re.sub(r"(?<![\w`/])@[A-Za-z0-9][A-Za-z0-9-]*", code, text)
-    return re.sub(r"(?<![\w`/&])#\d+\b", code, text)
+    text = re.sub(r"(?<![\w/])@[A-Za-z0-9][A-Za-z0-9-]*", code, text)
+    return re.sub(r"(?<![\w/&])#\d+\b", code, text)
 
 
 def defang(text: str) -> str:
@@ -258,10 +263,15 @@ class Proposal:
     kind: str = ""  # from the marker; "superseded" once the tool closed it for a newer tag
 
 
-def classify(prs: list[dict], issues: list[dict]) -> list[Proposal]:
-    """The tool's proposals: marked items, plus pull requests from a `sync/<tag>` branch (adopted)."""
+def classify(prs: list[dict], issues: list[dict], trusted: set[str]) -> list[Proposal]:
+    """The tool's proposals: marked items, plus pull requests from a `sync/<tag>` branch (adopted). The fork is
+    public, so only items by a trusted author (the owner, the Actions bot) count, and only same-repository pull
+    requests: a stranger's `their-fork:sync/vX` must never become the proposal or veto a tag."""
     out = []
     for item, is_pr in [*((p, True) for p in prs), *((i, False) for i in issues)]:
+        author = ((item.get("author") or {}).get("login") or "").lower()
+        if author not in trusted or (is_pr and item.get("isCrossRepository", True)):
+            continue
         body = item.get("body") or ""
         m = MARKER_RE.search(body)
         head = item.get("headRefName") or ""
@@ -284,7 +294,10 @@ def classify(prs: list[dict], issues: list[dict]) -> list[Proposal]:
 
 
 def closed_by_hand(props: list[Proposal], tag: str) -> Proposal | None:
-    """A proposal for this tag that a person closed. The tool marks what it closes `kind=superseded` first."""
+    """A proposal for this tag that a person closed, while none for it is open (closing the issue once its pull
+    request exists is housekeeping, not a veto). The tool marks what it closes `kind=superseded`."""
+    if any(p.tag == tag and p.state == "OPEN" for p in props):
+        return None
     return next(
         (p for p in props if p.tag == tag and p.state == "CLOSED" and p.kind != "superseded"), None
     )
@@ -499,6 +512,16 @@ def sync(git: Git, args, out: Path, rep: Report) -> int:
             (out / "checks.json").write_text(
                 json.dumps({"target": "", "tree": "", "lines": [], "failed": False})
             )
+        if args.apply and args.publish == "github":
+            for item in load_proposals(repo):
+                if item.state == "OPEN" and (version(item.tag) or (0, 0, 0)) <= version(base):
+                    supersede(
+                        rep,
+                        ["-R", repo],
+                        out,
+                        item,
+                        f"`{item.tag}` is in `{args.base_branch}` now.",
+                    )
         return 0
     rep.target = target = target_rel.tag
     if not git.rev(f"refs/tags/{target}"):
@@ -530,6 +553,18 @@ def sync(git: Git, args, out: Path, rep: Report) -> int:
             f"- `{path}`: " + ("; ".join(patches) if patches else "**not in the patch inventory**")
         )
     if not overlap:
+        rep.add("None.")
+    workflows = git(
+        "diff", "--name-status", "--no-renames", base, target, "--", ".github/workflows/"
+    )
+    rep.add("", f"### Upstream workflow files changed ({len(workflows.splitlines())})")
+    if workflows:
+        rep.add(
+            "Once merged they run in the fork; a new one is enabled unless disabled "
+            "(`gh workflow disable`, the table in `docs/fork/UPSTREAM.md`). Read each before merging.",
+            *[f"- {ln.split(chr(9))[0]} `{ln.split(chr(9))[-1]}`" for ln in workflows.splitlines()],
+        )
+    else:
         rep.add("None.")
     rep.add("", f"### New upstream migrations ({len(new_migs)})")
     rep.add(
@@ -720,11 +755,25 @@ def migration_section(
                 f"the checks were run on {saved.get('target')} tree {str(saved.get('tree'))[:10]}, this merge is "
                 f"{target} tree {tree[:10]} (main or the branch moved between the jobs): nothing written; next run"
             )
-        lines, failed = saved.get("lines", []), bool(saved.get("failed"))
+        lines, failed = sanitize_checks(saved.get("lines", [])), bool(saved.get("failed"))
     else:
         lines, failed = migration_checks(git, wt, base_wt, base_ref, args.alembic_db)
     rep.checks_failed = failed
     return lines
+
+
+def sanitize_checks(lines: list) -> list[str]:
+    """checks.json comes from the job that ran the release's code: keep it inert in the proposal (no end marker,
+    no mentions outside the fenced tool output), and bounded."""
+    out, fence = [], False
+    for raw in lines[:200]:
+        line = str(raw)[:500].replace("<!--", "&lt;!--")
+        if line.startswith("```"):
+            fence = not fence
+            out.append("```text" if fence else "```")
+            continue
+        out.append(line if fence else defang(line))
+    return out + (["```"] if fence else [])
 
 
 def alembic(backend: Path, db: str, *cmd: str) -> tuple[bool, str]:
@@ -902,7 +951,7 @@ def load_proposals(repo: str) -> list[Proposal]:
             "--limit",
             "200",
             "--json",
-            "number,url,body,headRefName,state",
+            "number,url,body,headRefName,state,isCrossRepository,author",
         ]
     )
     issues = gh_json(
@@ -917,10 +966,11 @@ def load_proposals(repo: str) -> list[Proposal]:
             "--limit",
             "200",
             "--json",
-            "number,url,body,state",
+            "number,url,body,state,author",
         ]
     )
-    return classify(prs or [], issues or [])
+    trusted = {repo.split("/")[0].lower(), *TRUSTED_BOTS}
+    return classify(prs or [], issues or [], trusted)
 
 
 def ci_runs_line(repo: str, branch: str, run_url: str) -> str:
@@ -1006,7 +1056,11 @@ def publish(
     own_pr = next((p for p in open_props if p.is_pr and p.tag == rep.target), None)
     own_issue = next((p for p in open_props if not p.is_pr and p.tag == rep.target), None)
     if kind == "pr" and args.dispatch_ci:
-        rep.ci = dispatch_ci(rep, repo, branch, head) if pushed else ci_runs_line(repo, branch, "")
+        if pushed:
+            rep.ci = dispatch_ci(rep, repo, branch, head)
+        else:
+            ci_line = re.search(r"^CI \(dispatched.*$", own_pr.body if own_pr else "", re.M)
+            rep.ci = ci_line.group(0) if ci_line else ci_runs_line(repo, branch, "")
 
     target: Proposal | None = None
     if own_pr:  # a conflict or refused push after the pull request exists is written into it, not a new issue
@@ -1017,7 +1071,7 @@ def publish(
             out,
             own_pr,
             title(rep, "pr") + state,
-            proposal_block(rep, args, kind, branch, repo),
+            kept(own_pr, proposal_block(rep, args, kind, branch, repo)),
             labels,
         )
         target = own_pr
@@ -1053,7 +1107,7 @@ def publish(
     if target is None:
         block = proposal_block(rep, args, kind, branch, repo)
         if own_issue:
-            update(rep, gh, out, own_issue, title(rep, kind), block, labels)
+            update(rep, gh, out, own_issue, title(rep, kind), kept(own_issue, block), labels)
             target = own_issue
         else:
             body_file = out / "issue-body.md"
@@ -1075,46 +1129,51 @@ def publish(
             target = Proposal(0, url, False, "OPEN", rep.target, block, True)
 
     for item in open_props:
-        if (
-            item.url == target.url or item.kind == "superseded"
-        ):  # superseded and open: a person reopened it
+        if item.url == target.url or reopened(item):
             continue
         older = (version(item.tag) or (0, 0, 0)) < (version(rep.target) or (0, 0, 0))
         own_issue_replaced = item.tag == rep.target and not item.is_pr and target.is_pr
         if older or own_issue_replaced:
-            supersede(rep, gh, out, item, target.url)
+            supersede(rep, gh, out, item, f"Superseded by the {rep.target} sync: {target.url}")
 
 
-def supersede(rep: Report, gh: list[str], out: Path, item: Proposal, by_url: str) -> None:
-    """Mark the proposal superseded, then close it; if a person reopens it, the tool leaves it open."""
+def reopened(item: Proposal) -> bool:
+    """Open although the tool closed it: a person reopened it on purpose, so it stays open from now on."""
+    return item.kind == "superseded" or item.kind.endswith("+kept")
+
+
+def kept(item: Proposal, block: str) -> str:
+    """Refreshing a reopened proposal keeps its mark, so the next run does not close it again."""
+    if not reopened(item):
+        return block
+    return MARKER_RE.sub(
+        lambda m: f"<!-- fork-sync tag={m[1]} kind={m[2]}+kept -->", block, count=1
+    )
+
+
+def supersede(rep: Report, gh: list[str], out: Path, item: Proposal, comment: str) -> None:
+    """Close the proposal, then mark it `kind=superseded`, so that if a person reopens it the tool leaves it open.
+    Closing first: a refused close leaves it unmarked, and the next run tries again."""
+    verb = "pr" if item.is_pr else "issue"
+    close = run(["gh", verb, "close", str(item.number), *gh, "--comment", comment], check=False)
+    if close.returncode:
+        rep.warnings.append(f"could not close {item.url}: {close.stderr.strip()}")
+        return
+    rep.actions.append(f"closed {item.url} (branch kept)")
     marker = f"<!-- fork-sync tag={item.tag} kind=superseded -->"
-    body = MARKER_RE.sub(marker, item.body, count=1) if item.marked else f"{marker}\n{item.body}"
+    if item.marked:
+        body = MARKER_RE.sub(lambda _m: marker, item.body, count=1)
+    else:  # an adopted pull request: an empty block, so the person's text is never taken for the tool's
+        body = f"{marker}\n<!-- fork-sync:end -->\n{item.body}"
     body_file = out / "close-body.md"
     body_file.write_text(body)
-    verb = "pr" if item.is_pr else "issue"
     edit = run(
         ["gh", verb, "edit", str(item.number), *gh, "--body-file", str(body_file)], check=False
     )
-    close = (
-        run(
-            [
-                "gh",
-                verb,
-                "close",
-                str(item.number),
-                *gh,
-                "--comment",
-                f"Superseded by the {rep.target} sync: {by_url}",
-            ],
-            check=False,
+    if edit.returncode:
+        rep.warnings.append(
+            f"closed {item.url} but could not mark it superseded: {edit.stderr.strip()}"
         )
-        if edit.returncode == 0
-        else edit
-    )
-    if close.returncode == 0:
-        rep.actions.append(f"closed superseded proposal {item.url} (branch kept)")
-    else:
-        rep.warnings.append(f"could not close {item.url}: {close.stderr.strip()}")
 
 
 def update(

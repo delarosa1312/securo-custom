@@ -58,15 +58,12 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
 
+      # No cache: this job runs the release's own code, which must not write a cache that main's CI restores.
       - name: Set up uv
         uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
         with:
           version: "0.13.0"
-          enable-cache: true
-          cache-dependency-glob: |
-            backend/uv.lock
-            backend/pyproject.toml
-            backend/.python-version
+          enable-cache: false
 
       - name: Trial merge and checks (writes nothing)
         env:
@@ -89,11 +86,20 @@ jobs:
           path: ${{ runner.temp }}/fork-sync/checks.json
           retention-days: 7
 
+      # On a scheduled or applying run the propose job publishes a failed check and fails; a dry run has no
+      # propose job, so it fails here.
+      - name: Fail a dry run whose migration checks failed
+        if: ${{ inputs.dry_run }}
+        run: python3 -c "import json,sys; sys.exit(1 if json.load(open('$RUNNER_TEMP/fork-sync/checks.json'))['failed'] else 0)"
+
   propose:
     name: Push and propose
     needs: check
     if: ${{ !inputs.dry_run }}
     runs-on: ubuntu-latest
+    # The optional FORK_SYNC_TOKEN lives in this environment, limited to main, never as a repository secret:
+    # a repository secret would reach the release's own workflows once a sync branch is pushed with it.
+    environment: fork-sync
     timeout-minutes: 15
     # contents: fast-forward upstream-main, push sync/<tag>; pull-requests, issues: the proposal;
     # actions: dispatch ci.yml on the sync branch, since a pull request opened by this token starts no run.
@@ -104,7 +110,7 @@ jobs:
       actions: write
     steps:
       # FORK_SYNC_TOKEN is optional (UPSTREAM.md): without it a release that changes upstream workflow files
-      # cannot be pushed and the job opens an issue asking for a local run.
+      # cannot be pushed and the job opens an issue asking for a local run. Empty when the secret is absent.
       - uses: actions/checkout@v7
         with:
           ref: main

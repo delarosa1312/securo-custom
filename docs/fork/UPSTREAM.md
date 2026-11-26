@@ -40,7 +40,8 @@ conflict, its resolution by hand, and today's state.
    base tag (from git, so it cannot miss a hook), with its patch inventory row, or "not in the patch inventory"
    when the inventory has drifted. Read the release notes and the diff of each. Where upstream now does what a patch
    does, retire the patch (remove the hook and the fork code, keep the data path described in its removal
-   condition).
+   condition). The report also lists upstream workflow files the range adds or changes: once merged they run in the
+   fork (a new one is enabled), so read each and disable any that does not apply (table below).
 6. Migration graph: both chain checks (`fork/tools/check.sh migrations`), then on a scratch PostgreSQL: `alembic
    upgrade heads` with `main` on an empty database, then `upgrade heads` with the merge on that same database (the
    deploy path), `alembic heads` and `current`. After a sync that brings upstream migrations there are exactly two
@@ -52,7 +53,7 @@ conflict, its resolution by hand, and today's state.
    sync branch.
 8. Pull request `sync/<tag>` to `main` (the tool opens it): security callout first, release notes summary (sections
    with item counts and the "Before you update" section of every release in the range), overlaps, new upstream
-   migrations, migration results, files changed by hand. The tool owns only the block between its markers and
+   migrations, upstream workflow files changed, migration results, files changed by hand. The tool owns only the block between its markers and
    rewrites it when something changed; add the conflicts resolved, patches retired, and the test and E2E results
    below it, where they are kept. A failed migration check puts `[checks failed]` in the title and fails the run.
    Never merge a failing sync.
@@ -66,7 +67,10 @@ One open proposal at a time, marked `upstream-sync` and by a hidden `fork-sync` 
   closes it with a link (branches stay; deleting is Matheus's call). One a person reopens stays open, for example
   an older security release to merge before a conflicting newer one.
 - a proposal for a tag that a person closed is not opened again: the run reports it and waits for a newer
-  release (reopen it to resume).
+  release (reopen it to resume). Closing the tag's issue once its pull request is open does not count.
+- once a tag reaches `main` (the sync pull request merged), the next run closes any proposal still open for that
+  tag or an older one.
+- only proposals by Matheus or the workflow, from branches of this repository, count; anything else is ignored.
 
 Security releases are synchronized first, ahead of feature work. The signal is a published upstream advisory whose
 patched version is inside the sync range, or release notes naming a vulnerability, a CVE or GHSA id, XSS, CSRF or
@@ -96,7 +100,9 @@ because a pull request opened by that token starts no workflow run.
 
 Optional, not set up (2026-11-26, Matheus decides later): a secret `FORK_SYNC_TOKEN` removes the local step. The
 workflow already uses it when it exists, and then pushes and pull requests appear as made by Matheus and CI starts
-on the pull request by itself (no dispatch). To create it:
+on the pull request by itself (no dispatch). It must be a secret of the `fork-sync` environment, never a repository
+secret: once a sync branch is pushed, the release's own workflows run on it in the fork, and a repository secret
+would reach them. An environment secret limited to `main` reaches only the sync's write job. To create it:
 
 1. github.com, Settings, Developer settings, Personal access tokens, Fine-grained tokens, Generate new token.
 2. Resource owner `delarosa1312`; Repository access: Only select repositories, `securo-custom`.
@@ -104,8 +110,10 @@ on the pull request by itself (no dispatch). To create it:
    by GitHub). Nothing else, no account permissions.
 4. Expiration of his choice (GitHub mails before it expires; an expired token makes the job fail at checkout, so
    renew it or delete the secret).
-5. In the repository: Settings, Secrets and variables, Actions, New repository secret, name `FORK_SYNC_TOKEN`, value
-   the token. Deleting the secret returns the workflow to the default token.
+5. In the repository: Settings, Environments, `fork-sync` (GitHub creates it on the workflow's first run; New
+   environment with that name before then). Deployment branches and tags: Selected branches and tags, add `main`.
+   Environment secrets, Add environment secret, name `FORK_SYNC_TOKEN`, value the token. Deleting the secret
+   returns the workflow to the default token.
 
 Quoted upstream text in a proposal has `@user`, `#123`, `owner/repo#123`, `GH-123` and issue or pull request URLs
 put in code (code spans stay as they are), so it pings nobody, links none of our issues and creates no

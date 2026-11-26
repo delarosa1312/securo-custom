@@ -111,11 +111,17 @@ second, the deploy path. Security comes from upstream advisories first and relea
 `v0.19.0` fixed an advisory its notes do not mention.
 The workflow runs in two jobs (review of #3): the release's own code (chain checks, uv, alembic) runs only in a
 read-only job, and the write job runs git and `gh` only, redoing the merge and refusing unless its tree equals the
-tested one, so a compromised release cannot use the write token before a person reviews it. The tool owns only a
+tested one, so a compromised release cannot use the write token before a person reviews it. Residual: the
+migration results the write job publishes come from the job that ran the release's code; tree equality guards what
+is pushed, not that text (the tool keeps it inert: mentions and markers defanged, fences closed). The read-only job
+uses no cache, so the release's code cannot plant one that `main`'s CI restores. A dry run with failed checks fails
+in the read-only job, since it has no write job. The tool owns only a
 marked block of a proposal's body, so notes added by hand survive the daily run, and it lists files a person changed
 on the sync branch instead of calling the merge untouched.
 Consequences: with the default token most syncs need one local command, because GitHub refuses that token's pushes
-of workflow-file changes (an optional `FORK_SYNC_TOKEN` removes the step); while "Allow GitHub Actions to create
+of workflow-file changes (an optional `FORK_SYNC_TOKEN` removes the step; it is a secret of the `fork-sync`
+environment limited to `main`, because a repository secret would reach the release's own workflows on the pushed
+sync branch); upstream workflow files run in the fork once merged, so the report lists them for review; while "Allow GitHub Actions to create
 and approve pull requests" is off, a clean sync needs one click to open its pull request; a pull request opened by
 the default token starts no CI, so the tool dispatches `ci.yml` (`actions: write`) and links the run; the closed
 proposals' branches stay until Matheus deletes them.

@@ -139,6 +139,10 @@ def test_notes_summary_counts_sections_and_keeps_before_you_update_defanged():
             "[fix](`https://github.com/securo-finance/securo/pull/1742`)",
         ),
         ("a/b/c.py#L3 and &#39;", "a/b/c.py#L3 and &#39;"),
+        (  # a stray backtick must not pair with the added ones and free the mention
+            "Fix `x by @alice in https://github.com/securo-finance/securo/pull/1234",
+            "Fix \\`x by `@alice` in `https://github.com/securo-finance/securo/pull/1234`",
+        ),
     ],
 )
 def test_defang_neutralises_mentions_and_references_but_not_code(raw, safe):
@@ -252,27 +256,55 @@ def _p(number, tag, is_pr, state="OPEN", body=None, marked=True, kind="pr"):
     )
 
 
+OWNER = {"login": "owner"}
+BOT = {"login": "app/github-actions"}
+TRUSTED = {"owner", "app/github-actions"}
+
+
+def _pr(number, body, head, author=OWNER, cross=False, state="OPEN"):
+    return {
+        "number": number,
+        "url": f"u{number}",
+        "body": body,
+        "headRefName": head,
+        "state": state,
+        "author": author,
+        "isCrossRepository": cross,
+    }
+
+
 def test_classify_reads_markers_and_adopts_pull_requests_from_sync_branches():
     prs = [
-        {
-            "number": 1,
-            "url": "u1",
-            "body": "<!-- fork-sync tag=v1.1.0 kind=pr -->",
-            "headRefName": "sync/v1.1.0",
-            "state": "OPEN",
-        },
-        {
-            "number": 2,
-            "url": "u2",
-            "body": "Opened by hand",
-            "headRefName": "sync/v1.2.0",
-            "state": "OPEN",
-        },
-        {"number": 3, "url": "u3", "body": "feature", "headRefName": "feat/3-x", "state": "OPEN"},
+        _pr(1, "<!-- fork-sync tag=v1.1.0 kind=pr -->", "sync/v1.1.0", author=BOT),
+        _pr(2, "Opened by hand", "sync/v1.2.0"),
+        _pr(3, "feature", "feat/3-x"),
     ]
-    issues = [{"number": 4, "url": "u4", "body": "no marker", "state": "OPEN"}]
-    got = sync.classify(prs, issues)
+    issues = [{"number": 4, "url": "u4", "body": "no marker", "state": "OPEN", "author": BOT}]
+    got = sync.classify(prs, issues, TRUSTED)
     assert [(p.number, p.tag, p.marked) for p in got] == [(1, "v1.1.0", True), (2, "v1.2.0", False)]
+
+
+def test_strangers_and_other_repositories_are_never_proposals():
+    stranger = {"login": "someone"}
+    prs = [
+        _pr(
+            5, "x", "sync/v1.1.0", cross=True
+        ),  # their-fork:sync/v1.1.0, even under the owner's name
+        _pr(6, "<!-- fork-sync tag=v1.1.0 kind=pr -->", "sync/v1.1.0", author=stranger),
+        _pr(7, "<!-- fork-sync tag=v1.1.0 kind=pr -->", "x", author=stranger, state="CLOSED"),
+    ]
+    issues = [
+        {
+            "number": 8,
+            "url": "u8",
+            "body": "<!-- fork-sync tag=v1.1.0 kind=conflict -->",
+            "state": "CLOSED",
+            "author": stranger,
+        }
+    ]
+    props = sync.classify(prs, issues, TRUSTED)
+    assert props == []
+    assert sync.closed_by_hand(props, "v1.1.0") is None
 
 
 def test_closed_by_hand():
@@ -282,6 +314,11 @@ def test_closed_by_hand():
     closed_by_tool = _p(2, "v1.1.0", False, "CLOSED", kind="superseded")
     assert sync.closed_by_hand([closed_by_tool], "v1.1.0") is None
     assert sync.closed_by_hand([_p(1, "v1.0.0", True, "CLOSED")], "v1.1.0") is None
+    # Closing the issue once the pull request for the tag is open is housekeeping, not a veto.
+    assert (
+        sync.closed_by_hand([_p(2, "v1.1.0", False, "CLOSED"), _p(3, "v1.1.0", True)], "v1.1.0")
+        is None
+    )
 
 
 @pytest.fixture
@@ -365,26 +402,68 @@ def test_a_newer_pull_request_replaces_older_proposals_and_its_own_issue(fake_gh
     rep = _publish(fake_gh, "pr", props)
     assert _verbs(fake_gh.calls) == [
         "pr create -R",
-        "pr edit 3",
         "pr close 3",
-        "issue edit 4",
+        "pr edit 3",
         "issue close 4",
-        "issue edit 5",
+        "issue edit 4",
         "issue close 5",
+        "issue edit 5",
     ]
     marked = [c for c in fake_gh.calls if c[1:3] == ["pr", "edit"]][0][-1]
     assert marked.startswith("BODY=<!-- fork-sync tag=v1.0.5 kind=superseded -->")
-    assert sum("closed superseded" in a for a in rep.actions) == 3
+    assert sum(a.startswith("closed ") for a in rep.actions) == 3
 
 
 def test_a_newer_conflict_replaces_an_older_pull_request(fake_gh):
     _publish(fake_gh, "conflict", [_p(3, "v1.0.5", True)], conflicts=["app.py"])
-    assert _verbs(fake_gh.calls) == ["issue create -R", "pr edit 3", "pr close 3"]
+    assert _verbs(fake_gh.calls) == ["issue create -R", "pr close 3", "pr edit 3"]
 
 
 def test_a_superseded_proposal_reopened_by_a_person_stays_open(fake_gh):
     _publish(fake_gh, "pr", [_p(3, "v1.0.5", True, kind="superseded")])
     assert _verbs(fake_gh.calls) == ["pr create -R"]
+
+
+def test_a_reopened_proposal_refreshed_with_tag_stays_kept(fake_gh):
+    reopened = _p(12, "v1.1.0", True, kind="superseded")
+    _publish(
+        fake_gh, "pr", [reopened]
+    )  # e.g. a dispatch with --tag v1.1.0 to merge an older security release
+    edit = fake_gh.calls[-1]
+    assert edit[1:4] == ["pr", "edit", "12"] and "kind=pr+kept" in edit[-1]
+    refreshed = _p(12, "v1.1.0", True, body=edit[-1][len("BODY=") :], kind="pr+kept")
+    fake_gh.calls.clear()
+    rep = sync.Report(base="v1.0.0", target="v1.2.0")  # the next scheduled run, for a newer tag
+    sync.publish(rep, _args(), "o/fork", fake_gh.out, "sync/v1.2.0", "pr", True, "abc", [refreshed])
+    assert _verbs(fake_gh.calls) == ["pr create -R"]
+
+
+def test_an_adopted_pull_request_closed_as_superseded_keeps_its_text(fake_gh):
+    adopted = _p(9, "v1.0.5", True, body="Opened by hand, notes here.", marked=False, kind="")
+    _publish(fake_gh, "pr", [adopted])
+    marked = fake_gh.calls[-1][-1][len("BODY=") :]
+    block = "<!-- fork-sync tag=v1.0.5 kind=pr -->\nnew\n<!-- fork-sync:end -->\n"
+    assert sync.merge_body(marked, block) == block + "Opened by hand, notes here."
+
+
+def test_a_rerun_that_pushes_nothing_keeps_the_linked_ci_run(fake_gh):
+    line = sync.ci_runs_line("o/fork", "sync/v1.1.0", "https://github.com/o/fork/actions/runs/42")
+    body = f"<!-- fork-sync tag=v1.1.0 kind=pr -->\n{line}\n<!-- fork-sync:end -->\n"
+    rep = sync.Report(base="v1.0.0", target="v1.1.0")
+    own = _p(7, "v1.1.0", True, body=body)
+    sync.publish(
+        rep,
+        _args(dispatch_ci=True),
+        "o/fork",
+        fake_gh.out,
+        "sync/v1.1.0",
+        "pr",
+        False,
+        "abc",
+        [own],
+    )
+    assert rep.ci == line
+    assert not any(c[1:3] == ["workflow", "run"] for c in fake_gh.calls)
 
 
 def test_a_refused_pull_request_becomes_an_issue_with_the_link_to_open_it(fake_gh):
@@ -402,8 +481,27 @@ def test_a_refused_pull_request_becomes_an_issue_with_the_link_to_open_it(fake_g
 def test_a_failed_close_is_reported_not_claimed(fake_gh):
     fake_gh.refuse.add("pr close")
     rep = _publish(fake_gh, "pr", [_p(3, "v1.0.5", True)])
-    assert not any("closed superseded" in a for a in rep.actions)
+    assert not any(a.startswith("closed ") for a in rep.actions)
     assert any("could not close" in w for w in rep.warnings)
+    assert "pr edit 3" not in _verbs(fake_gh.calls)  # left unmarked, so the next run tries again
+
+
+def test_check_results_from_the_check_job_stay_inert():
+    lines = [
+        "- migration chain (fork line): FAILED by @mallory",
+        "```text",
+        "ping @x <!-- fork-sync:end -->",
+        "```",
+        "<!-- fork-sync:end --> #3",
+        "```text",
+        "unclosed",
+    ]
+    got = sync.sanitize_checks(lines)
+    assert got[0] == "- migration chain (fork line): FAILED by `@mallory`"
+    assert got[2] == "ping @x &lt;!-- fork-sync:end -->"  # inside the fence: inert, left as is
+    assert got[4] == "&lt;!-- fork-sync:end --> `#3`"
+    assert got[-1] == "```"  # an unclosed fence is closed
+    assert not any("<!--" in line for line in got)
 
 
 # ---------------------------------------------------------------- git writes, on local repositories
@@ -581,6 +679,17 @@ def test_a_failed_check_is_published_loudly_and_fails_the_run(repos):
     body = (repos.out / "pr-body.md").read_text()
     assert "- migration chain (fork line): FAILED" in body and "fork line broken" in body
     assert "[checks failed]" in (repos.out / "report.md").read_text()
+
+
+def test_upstream_workflow_changes_are_listed(repos, monkeypatch):
+    _commit(repos.up, ".github/workflows/new.yml", "on: push\n", "upstream workflow")
+    _git(repos.up, "tag", "-a", "v1.2.0", "-m", "v1.2.0")
+    releases = [_rel("v1.0.0"), _rel("v1.1.0"), _rel("v1.2.0")]
+    monkeypatch.setattr(sync, "gh_json", lambda args: releases if "releases" in args[1] else [])
+    assert _sync(repos) == 0
+    report = (repos.out / "report.md").read_text()
+    assert "### Upstream workflow files changed (1)" in report
+    assert "- A `.github/workflows/new.yml`" in report
 
 
 def test_nothing_to_sync_reports_and_writes_nothing(repos):
