@@ -1,7 +1,7 @@
 // Fork F-001: the dashboard's Available balance and the card widget's after-paying
 // figure leave out an account switched off; net worth and the cash row keep it.
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { screen, within } from '@testing-library/react'
+import { screen, waitFor, within } from '@testing-library/react'
 
 import DashboardPage from '@/pages/dashboard'
 import { CreditCardsWidget, type DashboardScope } from '@/components/dashboard-widgets'
@@ -142,6 +142,17 @@ describe('Available balance with an account switched off', () => {
     expect(screen.queryByText('Reserve')).not.toBeInTheDocument()
 
     // Net worth breakdown: the cash row still holds the reserve.
+    await user.hover(screen.getByRole('button', { name: 'i' }))
+    const tooltip = await screen.findByRole('tooltip')
+    expect(within(tooltip).getByText(t('dashboard.cashBalance')).parentElement!).toHaveTextContent(usd(1600))
+  })
+
+  it('keeps the reserve in the net-worth cash row while the summary is missing', async () => {
+    api.dashboard.summary.mockRejectedValue(new Error('summary failed'))
+    const { user } = renderDashboard()
+    await waitFor(() =>
+      expect(screen.getByText(t('dashboard.availableBalance')).nextElementSibling).toHaveTextContent(usd(600)),
+    )
     await user.hover(screen.getByRole('button', { name: 'i' }))
     const tooltip = await screen.findByRole('tooltip')
     expect(within(tooltip).getByText(t('dashboard.cashBalance')).parentElement!).toHaveTextContent(usd(1600))

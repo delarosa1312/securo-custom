@@ -186,3 +186,5 @@ async def test_other_workspace_account_is_not_found(session: AsyncSession, ext_c
     assert result == {"error": "account not found"}
     await session.refresh(foreign)
     assert foreign.include_in_available is True
+    read = await _call("get_available_balance")(session=session, ctx=ext_ctx, account_ids=[str(foreign.id)])
+    assert read["available_balance"] == 0.0 and read["accounts"] == []

@@ -186,3 +186,20 @@ async def test_detected_pattern_of_an_off_account_stays_out(session, test_user, 
     off = await _forecast(session, test_workspace)
     assert not any("Reserve Yield Co" in e for e in _events(off))
     assert off.summary.total_projected_inflow == Decimal("0.00")
+
+
+@pytest.mark.asyncio
+async def test_pattern_split_over_two_accounts_keeps_only_the_included_share(session, test_user, test_workspace):
+    # One payee paying into both accounts on the same day must not hand the
+    # whole pattern to whichever row sorts last.
+    checking = await _account(session, test_user, test_workspace, "Current account", "checking", "500.00")
+    reserve = await _account(session, test_user, test_workspace, "Reserve", "savings", "1000.00", include=False)
+    for weeks_back in (6, 4, 2):
+        paid = app_today() - timedelta(weeks=weeks_back)
+        session.add(_posted(test_user, test_workspace, checking, "Acme Payroll", "4000.00", "credit", paid))
+        session.add(_posted(test_user, test_workspace, reserve, "Acme Payroll", "1000.00", "credit", paid))
+    await session.commit()
+
+    forecast = await _forecast(session, test_workspace)
+    payroll = [e for e in _events(forecast) if "Acme Payroll" in e]
+    assert payroll and all(e.startswith("+4000.00 ") for e in payroll)

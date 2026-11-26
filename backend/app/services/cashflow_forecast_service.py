@@ -223,6 +223,7 @@ async def generate_cashflow_forecast(
         lookback_days=180,
         reference_date=today,
         exclude_recurring_ids=manual_recurring_ids,
+        exclude_account_ids=left_out,  # fork F-001
     )
     unconverted_currencies.update(detected_res.unconverted_currencies)
 
@@ -277,8 +278,6 @@ async def generate_cashflow_forecast(
     # cannot hide a shortfall. Lapsed items have stopped and stay out.
     schedule_items = []
     for item in detected_res.items:
-        if item.account_id in left_out:  # fork F-001
-            continue
         if any(_matches_manual_rule(item, rule) for rule in manual_rules):
             continue
         if item.status == SubscriptionStatusEnum.PENDING:
@@ -326,7 +325,6 @@ async def generate_cashflow_forecast(
             item.normalized_key.lower()
             for item in detected_res.items
             if item.direction == FlowDirectionEnum.OUTFLOW
-            and item.account_id not in left_out  # fork F-001
         }
         burn_total = Decimal("0.00")
         for t, pnl_amount in hist_txs:

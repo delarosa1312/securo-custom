@@ -2,8 +2,10 @@
 
 Open checking, savings and wallet accounts whose `include_in_available` is on.
 An account switched off keeps its balance, history, reports and net worth; only
-the available figures leave it out. Pure: serialized accounts in, `Decimal` out,
-so REST, MCP, the predictive forecast and the dashboard agree on one number.
+the available figures leave it out. Pure: serialized accounts in, `Decimal` out.
+REST and MCP sum exactly as the dashboard headline does; the predictive forecast
+uses the same accounts but its own sum (workspace currency, unconverted accounts
+dropped), so its figure differs when currencies differ.
 """
 
 from __future__ import annotations

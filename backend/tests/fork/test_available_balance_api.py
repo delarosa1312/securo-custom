@@ -288,3 +288,53 @@ async def test_backup_without_the_column_restores_as_included(client: AsyncClien
     restored_ws = await _restore(client, auth_headers, out.getvalue())
     restored = (await session.execute(select(Account).where(Account.workspace_id == restored_ws))).scalar_one()
     assert restored.include_in_available is True
+
+
+@pytest.mark.asyncio
+async def test_currencies_match_the_dashboard_rule_and_mcp(
+    client: AsyncClient, auth_headers, session: AsyncSession, test_user
+):
+    import mcp_server.tools  # noqa: F401
+    from mcp_server.auth import CallContext
+    from mcp_server.registry import REGISTRY
+
+    from app.core.app_clock import app_today
+    from app.models.fx_rate import FxRate
+
+    session.add(FxRate(base_currency="USD", quote_currency="BRL", date=app_today(), rate=Decimal("5.0"), source="test"))
+    await session.commit()
+    await _create(client, auth_headers, "Current account", "checking", "500.00")
+    for name, type_, balance, currency in (
+        ("Dollar account", "checking", "33.33", "USD"),
+        ("Euro savings", "savings", "100.00", "EUR"),  # no rate: summed at its native amount
+        ("Dollar reserve", "savings", "1000.00", "USD"),
+    ):
+        resp = await client.post(
+            "/api/accounts", headers=auth_headers,
+            json={"name": name, "type": type_, "balance": balance, "currency": currency},
+        )
+        assert resp.status_code == 201, resp.text
+        if name == "Dollar reserve":
+            await _patch(client, auth_headers, resp.json()["id"], include_in_available=False)
+
+    body = (await client.get(URL, headers=auth_headers)).json()
+    # 500.00 + 33.33 x 5 = 166.65 + 100.00 unconverted EUR.
+    assert body["total_primary"] == 766.65
+    assert body["by_currency"] == {"BRL": 500.0, "USD": 33.33, "EUR": 100.0}
+    assert body["fx_fallback"] is True
+    assert body["unconverted_currencies"] == ["EUR"]
+
+    # The dashboard headline rule over the same account list.
+    listed = (await client.get("/api/accounts", headers=auth_headers)).json()
+    dashboard = sum(
+        Decimal(str(a["balance_primary"] if a["balance_primary"] is not None else a["current_balance"]))
+        for a in listed
+        if a["type"] in {"checking", "savings", "wallet"} and a["include_in_available"]
+    )
+    assert dashboard == Decimal("766.65")
+
+    ctx = CallContext(user_id=test_user.id, conversation_id=uuid.uuid4())
+    mcp = await REGISTRY["get_available_balance"].handler(session=session, ctx=ctx)
+    assert mcp["available_balance"] == body["total_primary"]
+    assert mcp["by_currency"] == body["by_currency"]
+    assert mcp["unconverted_currencies"] == ["EUR"]

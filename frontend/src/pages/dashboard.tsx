@@ -650,12 +650,17 @@ export default function DashboardPage() {
   // Investment brokerage accounts are excluded (issue #959); they show under
   // net worth as "Investment accounts", not as available cash. Scoped to the
   // active Collection filter, same as the rest of the dashboard.
-  const availableBalanceAccounts = useMemo(() => {
+  const cashAccounts = useMemo(() => {
     const all = accountsList ?? []
     const scoped = activeAccountIds ? all.filter((a) => activeAccountIds.includes(a.id)) : all
-    return scoped.filter((a) => (a.type === 'checking' || a.type === 'savings' || a.type === 'wallet') && isIncludedInAvailable(a))
+    return scoped.filter((a) => a.type === 'checking' || a.type === 'savings' || a.type === 'wallet')
   }, [accountsList, activeAccountIds])
+  // Fork F-001: accounts switched off leave the available figures, never the net-worth cash row.
+  const availableBalanceAccounts = useMemo(() => cashAccounts.filter(isIncludedInAvailable), [cashAccounts])
   const availableBalanceFromAccounts = availableBalanceAccounts.reduce(
+    (sum, a) => sum + Number(a.balance_primary ?? a.current_balance), 0,
+  )
+  const cashBalanceFromAccounts = cashAccounts.reduce(
     (sum, a) => sum + Number(a.balance_primary ?? a.current_balance), 0,
   )
   // The headline and its captions stay on the account list, so they agree with
@@ -665,7 +670,7 @@ export default function DashboardPage() {
   const availableBalance = availableBalanceFromAccounts
   const netWorthCashBalance = noAccounts
     ? 0
-    : (summary?.cash_balance_primary ?? availableBalanceFromAccounts)
+    : (summary?.cash_balance_primary ?? cashBalanceFromAccounts)
   // A foreign account without a real FX rate is summed at its native amount,
   // so the headline total is an estimate; say so instead of hiding it (#1165).
   const availableBalanceHasFxFallback = availableBalanceAccounts.some((a) => a.fx_fallback)
