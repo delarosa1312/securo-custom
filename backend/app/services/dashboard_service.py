@@ -194,6 +194,9 @@ async def _get_recurring_projections(
     )
     if account_ids:
         stmt = stmt.where(RecurringTransaction.account_id.in_(account_ids))
+    # Fork F-006: like forecast rows, nothing projects from a closed account.
+    from app.fork.projection_consistency import on_open_account
+    stmt = on_open_account(stmt)
     result = await session.execute(stmt)
     recurring_list = list(result.scalars().all())
     card_cycles = (
@@ -1290,6 +1293,8 @@ async def get_projected_transactions(
     )
     if account_id is not None:
         stmt = stmt.where(RecurringTransaction.account_id == account_id)
+    from app.fork.projection_consistency import on_open_account  # fork F-006
+    stmt = on_open_account(stmt)
     result = await session.execute(stmt)
     recurring_list = list(result.scalars().all())
     card_cycles = (
@@ -2070,6 +2075,12 @@ async def get_balance_history(
                 current_start += await _signed_forecast_amount_primary(
                     session, tx, primary_currency
                 )
+            # Fork F-006: and the schedules and claims due before that month.
+            from app.fork.projection_consistency import scheduled_balance_moves
+            current_start += sum((await scheduled_balance_moves(
+                session, workspace_id, today + timedelta(days=1), month_start, account_ids,
+                primary_currency, skip_account_ids=loan_ids,
+            )).values())
 
         proj_start = max(month_start, today + timedelta(days=1))
         forecast_transactions = await _get_forecast_transactions(
@@ -2093,19 +2104,13 @@ async def get_balance_history(
             )
             proj_deltas[tx.date.day] = proj_deltas.get(tx.date.day, 0) + float(converted)
 
-        projections = await _get_recurring_projections(
-            session, workspace_id, proj_start, month_end, account_ids
-        )
-        for proj in projections:
-            if proj["account_id"] in loan_ids:
-                continue
-            day = proj["date"].day
-            proj_converted, _ = await convert(
-                session, Decimal(str(proj["amount"])), proj["currency"], primary_currency,
-            )
-            amount = float(proj_converted)
-            signed = amount if proj["type"] == "credit" else -amount
-            proj_deltas[day] = proj_deltas.get(day, 0) + signed
+        # Fork F-006: the card's virtual moves (transfer-like rules, claims).
+        from app.fork.projection_consistency import scheduled_balance_moves
+        for move_date, signed in (await scheduled_balance_moves(
+            session, workspace_id, proj_start, month_end, account_ids,
+            primary_currency, skip_account_ids=loan_ids,
+        )).items():
+            proj_deltas[move_date.day] = proj_deltas.get(move_date.day, 0) + signed
 
     # Build current month daily balances
     current_daily = []

@@ -1627,6 +1627,7 @@ async def get_cash_flow_report(
     """
     from app.services.dashboard_service import _balance_at, _get_recurring_projections
     from app.services.fx_rate_service import get_rate
+    from app.services._query_filters import is_not_ignored
 
     acct_filter = [Transaction.account_id.in_(account_ids)] if account_ids is not None else []
     today = app_today()
@@ -1685,6 +1686,9 @@ async def get_cash_flow_report(
 
     # Reporting buckets follow the user override. Balance reconstruction
     # follows the original movement date to avoid applying a posted row twice.
+    # Fork F-006: the walk takes every row that moves a balance (transfer legs,
+    # rows kept out of P&L) like the anchor, on its own date (a card payment's
+    # two legs move together); the bars stay income and expense.
     posted_result = await session.execute(
         with_category_lines(
             select(
@@ -1694,6 +1698,8 @@ async def get_cash_flow_report(
                 line_amount(),
                 line_amount_primary(),
                 Transaction.currency,
+                case((counts_as_pnl(line_category_id()), True), else_=False),
+                Transaction.date,
             ).select_from(Transaction)
         )
         .join(Account, Transaction.account_id == Account.id)
@@ -1703,14 +1709,17 @@ async def get_cash_flow_report(
             or_(
                 and_(flow_date_col >= chart_start, flow_date_col <= end),
                 and_(balance_date_col > chart_start, balance_date_col <= end),
+                and_(Transaction.date > chart_start, Transaction.date <= end),
             ),
             Transaction.source != "opening_balance",
             Transaction.status == "posted",
-            counts_as_pnl(line_category_id()),
+            is_not_ignored(),
             *acct_filter,
         )
     )
-    for report_date, balance_date, tx_type, amt, amt_primary, ccy in posted_result.all():
+    for report_date, balance_date, tx_type, amt, amt_primary, ccy, is_pnl, moved_on in posted_result.all():
+        if not is_pnl:
+            balance_date = moved_on
         if amt_primary is not None:
             amount_primary = float(amt_primary)
         else:
@@ -1718,7 +1727,7 @@ async def get_cash_flow_report(
         if amount_primary == 0:
             continue
         amount_primary = abs(amount_primary)
-        if chart_start <= report_date <= end:
+        if is_pnl and chart_start <= report_date <= end:
             _add_flow(report_date, amount_primary, tx_type == "credit")
         if chart_start < balance_date <= end:
             _add_balance_flow(balance_date, amount_primary, tx_type == "credit")
@@ -1742,7 +1751,7 @@ async def get_cash_flow_report(
     )
     pending_current_delta = 0.0
     pending_by_id: dict[uuid.UUID, Transaction] = {}
-    for range_date_col in (forecast_report_date_col, forecast_balance_date_col):
+    for range_date_col in (forecast_report_date_col, forecast_balance_date_col, Transaction.date):
         rows = await _get_forecast_transactions(
             session, workspace_id, date.min, end + timedelta(days=1), account_ids,
             range_date_col=range_date_col,
@@ -1750,28 +1759,33 @@ async def get_cash_flow_report(
         pending_by_id.update((tx.id, tx) for tx in rows)
     pending_forecast = list(pending_by_id.values())
     for tx in pending_forecast:
-        pnl_ratio = user_pnl_ratio(tx)
-        if tx.status != "pending" or not pnl_ratio:
+        # Fork F-006: a pending row moves its account by the full amount, as
+        # posted rows do; the bars count only the user's P&L share of it.
+        if tx.status != "pending" or tx.is_ignored or (tx.category and tx.category.is_ignored):
             continue
+        pnl_ratio = user_pnl_ratio(tx)
         balance_date = tx.effective_bill_date or (tx.effective_date if accrual else tx.date)
         report_date = tx.reporting_date_override or balance_date
+        if not pnl_ratio:
+            balance_date = tx.date
         if tx.amount_primary is not None:
-            amount_primary = abs(float(tx.amount_primary))
+            full_amount_primary = abs(float(tx.amount_primary))
         else:
-            amount_primary = await _to_primary(Decimal(str(abs(tx.amount))), tx.currency)
-        amount_primary *= float(pnl_ratio)
-        if not amount_primary:
+            full_amount_primary = await _to_primary(Decimal(str(abs(tx.amount))), tx.currency)
+        amount_primary = full_amount_primary * float(pnl_ratio)
+        if not full_amount_primary:
             continue
-        if today < report_date <= end:
+        if amount_primary and today < report_date <= end:
             _add_flow(report_date, amount_primary, tx.type == "credit")
         if balance_date <= today:
-            # Connected providers may already include pending rows.
-            if not (tx.account and tx.account.connection_id):
+            # Connected providers may already include pending rows, except a
+            # placeholder generated from a schedule (as the dashboard card).
+            if not (tx.account and tx.account.connection_id) or tx.source == "recurring":
                 pending_current_delta += (
-                    amount_primary if tx.type == "credit" else -amount_primary
+                    full_amount_primary if tx.type == "credit" else -full_amount_primary
                 )
         elif balance_date <= end:
-            _add_balance_flow(balance_date, amount_primary, tx.type == "credit")
+            _add_balance_flow(balance_date, full_amount_primary, tx.type == "credit")
 
     # In accrual mode, a posted card purchase made today is already part of a
     # manual card's liability, while its cash impact belongs on the future bill
@@ -1818,6 +1832,15 @@ async def get_cash_flow_report(
             session, workspace_id, today + timedelta(days=1), end + timedelta(days=1),
             account_ids,
         )
+        # Fork F-006: transfer-like rules move balances, not the bars.
+        from app.fork.projection_consistency import only_in
+        for proj in only_in(await _get_recurring_projections(
+            session, workspace_id, today + timedelta(days=1), end + timedelta(days=1),
+            account_ids, include_transfer_like=True,
+        ), projections):
+            if today < proj["date"] <= end:
+                amount_primary = await _to_primary(Decimal(str(proj["amount"])), proj["currency"])
+                _add_balance_flow(proj["date"], amount_primary, proj["type"] == "credit")
 
     for proj in projections:
         d = proj["date"]
